@@ -1,0 +1,21 @@
+{"wave": 1, "specs": [
+ {"id":"w1_sharedloop","arch":"sharedloop","args":{"lr":0.012},
+  "hypothesis":"Depth can be expressed as an affine reparameterisation of ONE shared operator. If most of what distinguishes layer l from layer l+1 in a 5-layer model is a change of scale/offset rather than a change of function, then sharing all matrices and keeping only per-depth norm gains and biases (1,280 of 63,872 parameters) should cost far less quality than the 3.9x parameter reduction implies. Targets the empty cell (48-96K params, 128-256K bytes/token), which no dense model can reach at baseline width.",
+  "pred_text":"63,872 params, 255,488 unique bytes/token, ~5x read traffic vs unique. val_bpb in [1.85, 2.10] -- clearly worse than the 247K baseline but far better than a 1-layer model.",
+  "prediction":{"params":63872,"wbytes":255488,"val_bpb":[1.85,2.10]}},
+
+ {"id":"w1_hashffn","arch":"hashffn","args":{"lr":0.012},"knobs":{"experts":4},
+  "hypothesis":"Conditional computation with ZERO routing parameters. Four FFN experts per layer, selected by a hash of the (current, previous) token pair. Because the route is a pure function of the input text it needs no router, no load-balancing loss, and no gradient through a discrete choice. Triples parameter count at exactly the baseline's per-token read cost. Targets the empty cell (512-768K params, 768K-1.05M bytes/token).",
+  "pred_text":"754,432 params, 990,208 unique bytes/token (identical to baseline to the byte). val_bpb in [1.60, 1.72] -- better than baseline 1.7607 because capacity rises with no extra read.",
+  "prediction":{"params":754432,"wbytes":990208,"val_bpb":[1.60,1.72]}},
+
+ {"id":"w1_ternffn","arch":"ternffn","args":{"lr":0.012},"knobs":{"ffn_bpe":0.25},
+  "hypothesis":"The FFN holds 68% of this model's parameters and is the obvious place to buy bytes cheaply. Ternary weights with a per-row mean-absolute scale should retain most FFN function because SwiGLU is a sum over 176 hidden units and averaging tolerates per-weight noise. Same parameter COUNT, 2.8x fewer bytes read. Targets empty cell (224-288K params, 256-512K bytes/token).",
+  "pred_text":"247,552 params, 356,608 unique bytes/token. val_bpb in [1.85, 2.05] -- a real but bounded loss.",
+  "prediction":{"params":247552,"wbytes":356608,"val_bpb":[1.85,2.05]}},
+
+ {"id":"w1_novalue","arch":"novalue","args":{"lr":0.012},
+  "hypothesis":"Structural probe, not a cell-filling move: every variant so far assumes the vector you AVERAGE must be a different projection from the vector you MATCH on. Delete Wv and attend over K itself. If the value projection is largely redundant with the output projection Wo (which immediately follows the attention average), removing 10,240 parameters should cost much less than 4% of quality.",
+  "pred_text":"237,312 params, 949,248 unique bytes/token, same cell as baseline. val_bpb in [1.78, 1.92].",
+  "prediction":{"params":237312,"wbytes":949248,"val_bpb":[1.78,1.92]}}
+]}

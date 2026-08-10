@@ -1,0 +1,8 @@
+# generated artifacts, not source
+disco
+disco2
+data/
+runs/
+__pycache__/
+chain.log
+chain.sh

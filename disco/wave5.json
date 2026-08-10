@@ -1,0 +1,24 @@
+{"wave": 5, "specs": [
+ {"id":"w5_cascade","arch":"cascade","args":{"lr":0.012},"knobs":{"casc":1,"tau":0.5,"nslot":4096,"fdim":32,"flam":0.5},
+  "hypothesis":"ANSWER TO THE REFLECTION IN SECTION R1. Every variant so far assumes all bytes deserve the same computation. Here a tiny bigram-memory net (its own 32-dim embedding, a 4096-row hashed bigram table, its own unembedding -- ~33KB read per byte, 30x cheaper than the transformer) proposes every byte, and the transformer runs only when the small net's own max probability falls below tau. The two nets share no parameters, so their byte costs are disjoint and countable separately. The transformer still sees every byte, catching up on the backlog in one batched pass whose weights are counted once -- so bytes/token = fast_bytes + big_bytes/(mean run length). Byte-level text should be highly bigram-predictable inside words, so a large fraction of bytes may never need the transformer at all.",
+  "pred_text":"395,104 params. At tau=0.5 I expect 35-60% of bytes handled by the fast net, giving 400,000-700,000 unique bytes/token. val_bpb in [1.85, 2.15] -- worse than baseline because the fast net's bytes are cheap in bits too.",
+  "prediction":{"params":395104,"val_bpb":[1.85,2.15]}},
+
+ {"id":"w5_cascade_t80","arch":"cascade","args":{"lr":0.012},"knobs":{"casc":1,"tau":0.8,"nslot":4096,"fdim":32,"flam":0.5},
+  "reuse_ckpt":"w5_cascade",
+  "hypothesis":"Same trained model, stricter gate: the fast net must be 80% sure. tau is a pure decode-time rule, so this costs no training. Sweeps the same model along the bytes axis.",
+  "pred_text":"Fewer bytes taken by the fast net, so higher bytes/token but better bpb. val_bpb in [1.78, 1.95].",
+  "prediction":{"params":395104,"val_bpb":[1.78,1.95]}},
+
+ {"id":"w5_cascade_t20","arch":"cascade","args":{"lr":0.012},"knobs":{"casc":1,"tau":0.2,"nslot":4096,"fdim":32,"flam":0.5},
+  "reuse_ckpt":"w5_cascade",
+  "hypothesis":"Same trained model, permissive gate: the fast net emits whenever it is even 20% sure. Pushes hard into the low-bytes corner of the grid and should show where the quality cliff is.",
+  "pred_text":"Most bytes handled by the fast net. val_bpb in [2.1, 2.8], unique bytes/token possibly under 150,000.",
+  "prediction":{"params":395104,"val_bpb":[2.1,2.8]}},
+
+ {"id":"w5_adaptmulti4","arch":"multitok","args":{"lr":0.012},"knobs":{"kout":4,"tau":0.6},
+  "reuse_ckpt":"w3_multitok4",
+  "hypothesis":"The same confidence idea applied to the OTHER conditional axis found in wave 3: reuse the trained K=4 multitok model but only emit head j when head j is itself at least 60% confident. Blind emission is cheap where the text is locally determined and expensive where it is not; letting the model choose per position should dominate fixed K=4 on both axes at once.",
+  "pred_text":"259,840 params. Tokens per block between 1.5 and 3.0, so unique bytes/token between 350,000 and 700,000, with val_bpb well below fixed K=4.",
+  "prediction":{"params":259840,"val_bpb":[1.85,2.35]}}
+]}

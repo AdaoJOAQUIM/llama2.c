@@ -1,0 +1,21 @@
+{"wave": 3, "specs": [
+ {"id":"w3_multitok2","arch":"multitok","args":{"lr":0.012},"knobs":{"kout":2},
+  "hypothesis":"THE ASSUMPTION EVERY VARIANT SO FAR SHARES: one token emitted per full network evaluation. Nothing about the architecture forces this. Emit 2 tokens per forward from two head-adapters over a shared unembedding, with NO verification and no rollback -- token 2 is produced without having seen token 1. Bytes per emitted token halve for free. val_bpb is scored under exactly this emission process (trunk runs only at t == 0 mod 2; each token scored by the head that produced it), so the number is comparable to every other row in the table.",
+  "pred_text":"251,648 params, 503,296 unique bytes/token (half of 1,006,592 per forward). val_bpb in [1.90, 2.25].",
+  "prediction":{"params":251648,"wbytes":503296,"val_bpb":[1.90,2.25]}},
+
+ {"id":"w3_multitok4","arch":"multitok","args":{"lr":0.012},"knobs":{"kout":4},
+  "hypothesis":"Same mechanism at K=4: a quarter of the read cost per token, three of every four tokens emitted blind.",
+  "pred_text":"259,840 params, 259,840 unique bytes/token. val_bpb in [2.25, 2.75].",
+  "prediction":{"params":259840,"wbytes":259840,"val_bpb":[2.25,2.75]}},
+
+ {"id":"w3_multitok8","arch":"multitok","args":{"lr":0.012},"knobs":{"kout":8},
+  "hypothesis":"K=8 should be near the point where blind emission destroys coherence: 7 of 8 bytes are written without feedback. Included to locate the knee of the curve, not because it is expected to be good.",
+  "pred_text":"276,224 params, 138,112 unique bytes/token. val_bpb in [2.9, 3.8].",
+  "prediction":{"params":276224,"wbytes":138112,"val_bpb":[2.9,3.8]}},
+
+ {"id":"w3_hashffn8","arch":"hashffn","args":{"lr":0.012},"knobs":{"experts":8},
+  "hypothesis":"Push the zero-router conditional-computation idea to 8 experts: 5.8x the baseline parameter count at byte-for-byte identical per-token read cost. Targets the extreme cell (>768K params, 768K-1.05M bytes/token). If quality keeps improving with expert count at fixed read cost, the bytes axis and the params axis are genuinely decoupled and that is the most useful thing this search can establish.",
+  "pred_text":"1,430,272 params, 990,208 unique bytes/token (identical to baseline). val_bpb in [1.55, 1.70].",
+  "prediction":{"params":1430272,"wbytes":990208,"val_bpb":[1.55,1.70]}}
+]}

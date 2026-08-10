@@ -1,0 +1,32 @@
+{
+ "4,6": {
+  "arch": "llama",
+  "params": 247552,
+  "stored_bytes": 990208,
+  "train_loss": 1.18977,
+  "val_loss": 1.21334,
+  "val_bpb": 1.75048,
+  "train_sec": 552.6,
+  "steps": 800,
+  "bs": 16,
+  "seq": 256,
+  "lr": 0.012,
+  "seed": 4,
+  "tokens_seen": 3276800,
+  "id": "base_s4",
+  "train_wall": 558.5,
+  "wbytes_per_tok": 990208,
+  "wtraffic_per_tok": 990464,
+  "sbytes_per_tok": 170880,
+  "macs_per_tok": 332288,
+  "tok_per_sec": 15661.9,
+  "peak_rss_kb": 8396,
+  "consistency": 0.0,
+  "gen": 256,
+  "kout": 1,
+  "knobs": {},
+  "note": "",
+  "sample": "\n\nOnce upon a time, there was a big rock, went on the ando. But they loved to put it and never doing about the learled and the hat to thing the manoa. The ramman and down it was finished, doet on their hands aimserful blease, she saw a boat where soft to e",
+  "flags": []
+ }
+}

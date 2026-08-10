@@ -1,0 +1,21 @@
+{"wave": 2, "specs": [
+ {"id":"w2_emaconv","arch":"emaconv","args":{"lr":0.012},"knobs":{"convw":4},
+  "hypothesis":"Replace content-based retrieval entirely with two fixed timescales per channel: a width-4 depthwise causal convolution (local orthography) and a learned per-channel EMA (unbounded but non-selective range), gated multiplicatively. On byte-level text most of the entropy is local, so a mixer with O(1) decode state may lose less than the loss of attention suggests. Decode state becomes a constant 5,120 bytes per step instead of a KV cache growing with context.",
+  "pred_text":"269,632 params, 1,078,528 unique bytes/token, sbytes/token CONSTANT at ~5,120 (vs baseline ~169,600 averaged over 256 decoded tokens). val_bpb in [1.80, 2.15].",
+  "prediction":{"params":269632,"wbytes":1078528,"val_bpb":[1.80,2.15]}},
+
+ {"id":"w2_ngrammem","arch":"ngrammem","args":{"lr":0.012},"knobs":{"nslot":4096},
+  "hypothesis":"Move capacity out of matrices and into a lookup table. A 4,096-row memory addressed by hash(token, previous token), injected into the residual stream at every depth with a per-depth learned gain. Doubles parameter count while adding 256 bytes to the per-token read. If byte-level TinyStories is substantially bigram-predictable, a learned n-gram table welded to the transformer should buy quality almost for free on the I/O axis.",
+  "pred_text":"510,016 params, 991,744 unique bytes/token (+1,536 over baseline). val_bpb in [1.62, 1.74].",
+  "prediction":{"params":510016,"wbytes":991744,"val_bpb":[1.62,1.74]}},
+
+ {"id":"w2_deepgate","arch":"deepgate","args":{"lr":0.012},"knobs":{"gbias":2.0},
+  "hypothesis":"Mechanism test, and I expect it to FAIL in an informative way. Per-token hard FFN skip: rows whose gate <= 1/2 never touch w1/w2/w3. Because a closed row receives no gradient at its gate, gates can shut but never reopen -- there is no force pushing a gate closed except weight decay, and a strong force (the FFN's usefulness) pushing it open. Prediction: gates stay essentially all-open, byte savings under 10%, and the whole apparatus buys nothing. If instead gates close substantially, the dead-gradient asymmetry is weaker than I think.",
+  "pred_text":"247,877 params. Unique bytes/token in [900,000, 992,000] (i.e. <10% saving). val_bpb in [1.75, 1.85].",
+  "prediction":{"params":247877,"val_bpb":[1.75,1.85]}},
+
+ {"id":"w2_lowrankffn","arch":"lowrankffn","args":{"lr":0.012},"knobs":{"rank":24},
+  "hypothesis":"Both SwiGLU up-projections read the same 64-dim input, so they may not need independent 176x64 matrices; route both through one shared rank-24 bottleneck. Moves down-left on BOTH axes at once, targeting the empty cell (160-224K params, 512-768K bytes/token).",
+  "pred_text":"184,832 params, 739,328 unique bytes/token. val_bpb in [1.80, 1.95].",
+  "prediction":{"params":184832,"wbytes":739328,"val_bpb":[1.80,1.95]}}
+]}

@@ -1,0 +1,6 @@
+{"wave": 0, "specs": [
+ {"id":"base_s2","arch":"llama","args":{"lr":0.012},"seed":2,"hypothesis":"seed replicate for noise floor","pred_text":"n/a"},
+ {"id":"base_s3","arch":"llama","args":{"lr":0.012},"seed":3,"hypothesis":"seed replicate for noise floor","pred_text":"n/a"},
+ {"id":"base_s4","arch":"llama","args":{"lr":0.012},"seed":4,"hypothesis":"seed replicate for noise floor","pred_text":"n/a"},
+ {"id":"base_s5","arch":"llama","args":{"lr":0.012},"seed":5,"hypothesis":"seed replicate for noise floor","pred_text":"n/a"}
+]}

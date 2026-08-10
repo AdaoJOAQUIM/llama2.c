@@ -1,0 +1,21 @@
+{"wave": 4, "specs": [
+ {"id":"w4_q8all","arch":"quant","args":{"lr":0.012},"knobs":{"qffn":127,"qattn":127,"qemb":127},
+  "hypothesis":"Sweep the far-left columns that no change of topology can reach. 8-bit per-row symmetric quantisation of every matrix (FFN, attention, embedding/unembedding); only the 704 norm gains stay fp32. Same parameter count, 4x fewer bytes read. 255 states should be effectively lossless at this scale.",
+  "pred_text":"247,552 params, 249,664 unique bytes/token. val_bpb in [1.76, 1.84].",
+  "prediction":{"params":247552,"wbytes":249664,"val_bpb":[1.76,1.84]}},
+
+ {"id":"w4_q2all","arch":"quant","args":{"lr":0.012},"knobs":{"qffn":1,"qattn":1,"qemb":1},
+  "hypothesis":"The extreme of the same axis: ternary everything. 16x fewer bytes than fp32 at identical parameter count. I expect this to break, and specifically to break at the EMBEDDING rather than in the matrices: a ternary row of 64 values must encode the identity of a byte, and with a single per-row scale there are only 3^64 codes available but no pressure to keep them apart. If quantising the FFN alone (wave 1) costs little and quantising everything costs a lot, the difference localises where fp32 precision is actually load-bearing.",
+  "pred_text":"247,552 params, 64,528 unique bytes/token. val_bpb in [2.10, 2.80].",
+  "prediction":{"params":247552,"wbytes":64528,"val_bpb":[2.10,2.80]}},
+
+ {"id":"w4_kvshare","arch":"kvshare","args":{"lr":0.012},
+  "hypothesis":"Does depth need to re-derive WHAT to retrieve, or only HOW to ask? Compute K and V once at layer 0 and let all five layers attend over that single cache with their own queries. Deletes 4/5 of the K/V projections and 4/5 of the KV cache. If most of the per-layer specialisation lives in the query, this should cost little.",
+  "pred_text":"231,168 params, 924,672 unique bytes/token, sbytes/token down ~5x. val_bpb in [1.80, 1.95].",
+  "prediction":{"params":231168,"wbytes":924672,"val_bpb":[1.80,1.95]}},
+
+ {"id":"w4_loopexpert","arch":"loopexpert","args":{"lr":0.012},"knobs":{"experts":4},
+  "hypothesis":"RECOMBINATION of the two mechanisms in wave 1: a single shared attention block iterated 5 times (small unique read) whose FFN is drawn from 4 bigram-routed experts (large parameter count). Because the route depends only on the token pair, the SAME expert is selected at every depth, so unique bytes stay at one expert's worth however deep the loop runs. Targets the empty cell (160-224K params, 128-256K bytes/token) -- low on both axes at once, which neither parent reaches.",
+  "pred_text":"165,248 params, 255,488 unique bytes/token, ~5x read traffic vs unique. val_bpb in [1.80, 2.00].",
+  "prediction":{"params":165248,"wbytes":255488,"val_bpb":[1.80,2.00]}}
+]}
