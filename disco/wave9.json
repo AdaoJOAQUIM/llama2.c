@@ -1,0 +1,12 @@
+{"wave": 9, "specs": [
+ {"id":"w9_emaconv_h153","arch":"emaconv","args":{"lr":0.012,"hidden":153},"knobs":{"convw":4,"mix":0},
+  "hypothesis":"PARAMETER-MATCHED CONTROL for emaconv. The wave-2 emaconv carried 269,632 parameters, 8.9% more than the baseline, so part of its 6-sigma win could simply be capacity. Hidden 153 gives EXACTLY 247,552 parameters -- the baseline's count to the unit. If it still beats 1.7390 the win is the mixer, not the budget.",
+  "pred_text":"247,552 params (exactly the baseline). val_bpb in [1.69, 1.76].",
+  "prediction":{"params":247552,"val_bpb":[1.69,1.76]}},
+ {"id":"w9_hashffn_s2","arch":"hashffn","args":{"lr":0.012},"knobs":{"experts":4,"route":0},"seed":2,
+  "hypothesis":"Seed replicate to test the three-way tie (see reflection R1).","pred_text":"Near 1.676 if the tie is real.","prediction":{}},
+ {"id":"w9_emaconv_s2","arch":"emaconv","args":{"lr":0.012},"knobs":{"convw":4,"mix":0},"seed":2,
+  "hypothesis":"Seed replicate to test the three-way tie.","pred_text":"Near 1.681 if the tie is real.","prediction":{}},
+ {"id":"w9_ngrammem_s2","arch":"ngrammem","args":{"lr":0.012},"knobs":{"nslot":4096},"seed":2,
+  "hypothesis":"Seed replicate to test the three-way tie.","pred_text":"Near 1.686 if the tie is real.","prediction":{}}
+]}

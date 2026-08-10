@@ -1,0 +1,14 @@
+{"wave": 7, "specs": [
+ {"id":"w7_casc_t20","arch":"cascade","args":{"lr":0.012},"knobs":{"casc":1,"tau":0.2,"nslot":4096,"fdim":32,"flam":0.5},"reuse_ckpt":"w5_cascade",
+  "hypothesis":"tau sweep of the cascade: permissive gate. One trained model traces a curve through the grid because tau is a decode rule only.","pred_text":"Lowest bytes/token of the family, highest bpb.","prediction":{}},
+ {"id":"w7_casc_t80","arch":"cascade","args":{"lr":0.012},"knobs":{"casc":1,"tau":0.8,"nslot":4096,"fdim":32,"flam":0.5},"reuse_ckpt":"w5_cascade",
+  "hypothesis":"tau sweep: strict gate.","pred_text":"Higher bytes/token, bpb approaching the transformer-only limit.","prediction":{}},
+ {"id":"w7_casc_t95","arch":"cascade","args":{"lr":0.012},"knobs":{"casc":1,"tau":0.95,"nslot":4096,"fdim":32,"flam":0.5},"reuse_ckpt":"w5_cascade",
+  "hypothesis":"tau sweep: near-closed gate. Shows whether ANY bytes are predictable enough to skip the transformer for free.","pred_text":"bytes/token just below the dense limit if such bytes exist.","prediction":{}},
+ {"id":"w7_adapt8_t50","arch":"multitok","args":{"lr":0.012},"knobs":{"kout":8,"tau":0.5},"reuse_ckpt":"w3_multitok8",
+  "hypothesis":"Confidence-gated emission on the K=8 trunk. Fixed K=8 should be badly damaged; stopping early where the model is unsure ought to recover most of it while keeping much of the byte saving. If adaptive-K8 dominates fixed-K4 on BOTH axes, the useful quantity is confidence, not block size.","pred_text":"2-5 tokens per block, val_bpb far below fixed K=8.","prediction":{}},
+ {"id":"w7_adapt8_t85","arch":"multitok","args":{"lr":0.012},"knobs":{"kout":8,"tau":0.85},"reuse_ckpt":"w3_multitok8",
+  "hypothesis":"Strict gate on the K=8 trunk: the high-quality end of the adaptive-emission curve.","pred_text":"1.2-2.5 tokens per block, val_bpb near the K=1 baseline.","prediction":{}},
+ {"id":"w7_adapt4_t60","arch":"multitok","args":{"lr":0.012},"knobs":{"kout":4,"tau":0.6},"reuse_ckpt":"w3_multitok4",
+  "hypothesis":"Adaptive gating on the K=4 trunk, to confirm the gate helps across block sizes and is not an artefact of large K.","pred_text":"Between fixed K=1 and fixed K=4 on both axes, dominating fixed K=4.","prediction":{}}
+]}

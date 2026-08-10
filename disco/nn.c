@@ -47,6 +47,7 @@ Tensor *P_new(const char *name,int ndim,int a,int b,int c,int dd){
   t->is_param = 1; snprintf(t->name,sizeof(t->name),"%s",name);
   t->nrow = (ndim>=2)? t->shape[0] : 1; t->rowelem = t->n / t->nrow;
   t->touch = (unsigned char*)calloc(t->nrow,1); t->tany=0; t->tfull=0;
+  t->touchw= (unsigned char*)calloc(t->nrow,1); t->wany=0; t->wfull=0;
   if (g_nparams>=MAXPARAM){fprintf(stderr,"too many params\n");exit(1);}
   g_params[g_nparams++] = t; return t;
 }
@@ -59,6 +60,15 @@ long long wbytes_unique_step(void){
     memset(t->touch,0,t->nrow); t->tany=0; t->tfull=0; }
   return s;
 }
+long long wbytes_window_flush(void){
+  long long s=0;
+  for(int i=0;i<g_nparams;i++){ Tensor*t=g_params[i];
+    if(!t->wany) continue;
+    long long r=0; for(int k=0;k<t->nrow;k++) if(t->touchw[k]) r++;
+    s += (long long)(r*(double)t->rowelem*t->bpe);
+    memset(t->touchw,0,t->nrow); t->wany=0; t->wfull=0; }
+  return s;
+}
 long long params_count(void){ long long s=0; for(int i=0;i<g_nparams;i++) s+=g_params[i]->n; return s; }
 double params_bytes(void){ double s=0; for(int i=0;i<g_nparams;i++) s+=(double)g_params[i]->n*g_params[i]->bpe; return s; }
 float rnd_normal(void){ float u1=rnd_f()+1e-9f,u2=rnd_f(); return sqrtf(-2.0f*logf(u1))*cosf(6.28318530718f*u2); }
@@ -68,7 +78,7 @@ void params_init_ones(Tensor*t){ for(int i=0;i<t->n;i++) t->d[i]=1.0f; }
 
 /* ============================ tape ============================ */
 enum { O_LINEAR,O_MATMUL,O_EMB,O_RMSNORM,O_ADD,O_MUL,O_BIAS,O_SCALE,O_ACT,O_SOFTMAX,
-       O_SLICE,O_CONCAT,O_STE,O_ROPE,O_ATTN,O_CE,O_ROWS,O_SCATTER,O_DWCONV,O_EMA };
+       O_SLICE,O_CONCAT,O_STE,O_ROPE,O_ATTN,O_CE,O_ROWS,O_SCATTER,O_DWCONV,O_EMA,O_PLACE };
 typedef struct {
   int op; Tensor *a,*b,*c,*o;
   int i0,i1,i2,i3,i4,i5;
@@ -227,6 +237,11 @@ Tensor *op_concat(Tensor *a,Tensor *b){
                         memcpy(o->d+(size_t)m*(Da+Db)+Da,b->d+(size_t)m*Db,Db*sizeof(float)); }
   if(g_train){ Node*n=push(O_CONCAT); n->a=a;n->b=b;n->o=o;n->i0=M;n->i1=Da;n->i2=Db; }
   return o;
+}
+void op_place(Tensor *dst,Tensor *src,int off){
+  int M=src->shape[0],W=src->shape[1],DW=dst->shape[1];
+  for(int m=0;m<M;m++) memcpy(dst->d+(size_t)m*DW+off, src->d+(size_t)m*W, W*sizeof(float));
+  if(g_train){ Node*n=push(O_PLACE); n->a=src;n->o=dst;n->i0=M;n->i1=W;n->i2=off;n->i3=DW; }
 }
 Tensor *op_ste_quant(Tensor *x,int levels){
   Tensor*o=T_new(2,x->shape[0],x->shape[1],0,0);
@@ -438,11 +453,11 @@ static float *wsbuf(size_t n){ if(n>WSN){ WS=(float*)realloc(WS,n*sizeof(float))
 
 /* ---- profiling ---- */
 double g_prof[24]; long long g_profn[24]; int g_prof_on=0;
-static const char* g_opname[]={"LINEAR","MATMUL","EMB","RMSNORM","ADD","MUL","BIAS","SCALE","ACT","SOFTMAX","SLICE","CONCAT","STE","ROPE","ATTN","CE","ROWS","SCATTER","DWCONV","EMA"};
+static const char* g_opname[]={"LINEAR","MATMUL","EMB","RMSNORM","ADD","MUL","BIAS","SCALE","ACT","SOFTMAX","SLICE","CONCAT","STE","ROPE","ATTN","CE","ROWS","SCATTER","DWCONV","EMA","PLACE"};
 void prof_dump(const char*tag){
   if(!g_prof_on) return; double tot=0; for(int i=0;i<16;i++) tot+=g_prof[i];
   fprintf(stderr,"[prof %s] total %.3fs\n",tag,tot);
-  for(int i=0;i<20;i++) if(g_prof[i]>1e-4) fprintf(stderr,"   %-8s %7.3fs (%4.1f%%) n=%lld\n",g_opname[i],g_prof[i],100*g_prof[i]/tot,g_profn[i]);
+  for(int i=0;i<21;i++) if(g_prof[i]>1e-4) fprintf(stderr,"   %-8s %7.3fs (%4.1f%%) n=%lld\n",g_opname[i],g_prof[i],100*g_prof[i]/tot,g_profn[i]);
 }
 
 /* ============================ backward ============================ */
@@ -549,6 +564,9 @@ void tape_backward(void){
           a->g[d] += gal*dal_da;
         }
       } break;
+      case O_PLACE:{ int M=n->i0,W=n->i1,off=n->i2,DW=n->i3; Tensor*o=n->o;
+        for(int m=0;m<M;m++){ const float*go=o->g+(size_t)m*DW+off; float*gs=n->a->g+(size_t)m*W;
+          for(int k=0;k<W;k++) gs[k]+=go[k]; } } break;
       case O_ROWS:{ int nn=n->i0,D=n->i1; int*ix=(int*)n->aux; Tensor*o=n->o;
         for(int i=0;i<nn;i++){ float*gx=n->a->g+(size_t)ix[i]*D; const float*go=o->g+(size_t)i*D;
           for(int k=0;k<D;k++) gx[k]+=go[k]; } } break;

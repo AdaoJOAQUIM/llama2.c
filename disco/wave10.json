@@ -1,0 +1,10 @@
+{"wave": 10, "specs": [
+ {"id":"w10_hashffn_s3","arch":"hashffn","args":{"lr":0.012},"knobs":{"experts":4,"route":0},"seed":3,
+  "hypothesis":"Third seed. With three seeds each for the three winners, a one-way comparison of their means against the 0.0143 within-architecture sd can say whether the tie survives.","pred_text":"Near 1.676.","prediction":{}},
+ {"id":"w10_emaconv_s3","arch":"emaconv","args":{"lr":0.012},"knobs":{"convw":4,"mix":0},"seed":3,
+  "hypothesis":"Third seed for emaconv.","pred_text":"Near 1.681.","prediction":{}},
+ {"id":"w10_ngrammem_s3","arch":"ngrammem","args":{"lr":0.012},"knobs":{"nslot":4096},"seed":3,
+  "hypothesis":"Third seed for ngrammem.","pred_text":"Near 1.686.","prediction":{}},
+ {"id":"w10_emaconv_h153_s2","arch":"emaconv","args":{"lr":0.012,"hidden":153},"knobs":{"convw":4,"mix":0},"seed":2,
+  "hypothesis":"Second seed of the parameter-matched emaconv control, so the control itself has an error bar.","pred_text":"Near the w9 value.","prediction":{}}
+]}

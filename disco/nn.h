@@ -27,7 +27,8 @@ typedef struct Tensor {
   struct Tensor *src_param;  /* if this activation is a transform of a param, bill I/O to it */
   float *qbuf; int qvalid;   /* inference-time cache for quantised weights */
   unsigned char *touch;  /* per-row touched flags for the current decode step */
-  int nrow, rowelem, tany, tfull;
+  unsigned char *touchw; /* same, but cleared once per WINDOW of tokens */
+  int nrow, rowelem, tany, tfull, wany, wfull;
   char name[48];
 } Tensor;
 
@@ -63,10 +64,12 @@ static inline Tensor *io_owner(Tensor *t){ return t->is_param ? t : t->src_param
 static inline void touch_all_(Tensor *t){
   if(g_train||!t->is_param) return;
   if(!t->tfull){ memset(t->touch,1,t->nrow); t->tfull=1; t->tany=1; }
+  if(!t->wfull){ memset(t->touchw,1,t->nrow); t->wfull=1; t->wany=1; }
 }
 static inline void touch_row_(Tensor *t,int r){
   if(g_train||!t->is_param) return;
   t->touch[r]=1; t->tany=1;
+  t->touchw[r]=1; t->wany=1;
 }
 static inline void count_read_(Tensor *t, long long nelem) {
   if (g_train) return;
@@ -79,6 +82,12 @@ static inline void touch_all(Tensor *t){ Tensor*a=io_owner(t); if(a) touch_all_(
 static inline void touch_row(Tensor *t,int r){ Tensor*a=io_owner(t); if(a) touch_row_(a,r); }
 static inline void count_read(Tensor *t,long long n){ Tensor*a=io_owner(t); if(a) count_read_(a,n); else count_read_(t,n); }
 long long wbytes_unique_step(void);   /* sum touched rows, then clear for next token */
+/* Unique bytes touched over a WINDOW of consecutive tokens, divided by the window.
+   For a dense model this equals wbytes_unique_step().  For conditional computation
+   it is LARGER, because successive tokens visit different experts and the cache
+   sees their union.  Discovered because hashffn has identical MACs and identical
+   per-token unique bytes to the baseline yet decodes 17% slower. */
+long long wbytes_window_flush(void);
 
 /* ---------------- ops ---------------- */
 /* out[M,O] = x[M,I] @ W[O,I]^T */
@@ -101,6 +110,10 @@ Tensor *op_act    (Tensor *x, int kind);
 Tensor *op_softmax(Tensor *x);                       /* row-wise over last dim */
 Tensor *op_slice  (Tensor *x, int off, int len);     /* last-dim slice */
 Tensor *op_concat (Tensor *a, Tensor *b);
+/* Write src into dst's columns [off, off+src_width).  Building a wide tensor by
+   chaining op_concat is O(K^2) in memory -- at K=8 heads the intermediates came
+   to 303MB and exhausted the arena.  Allocate once, place K times. */
+void    op_place  (Tensor *dst, Tensor *src, int off);
 Tensor *op_gather (Tensor *W, int *idx, int M);      /* like emb, distinct name for MoE/hash */
 Tensor *op_ste_quant(Tensor *x, int levels);         /* straight-through uniform quantizer */
 Tensor *op_ternary(Tensor *W);                       /* per-row-scaled {-s,0,s}, STE, cached at infer */

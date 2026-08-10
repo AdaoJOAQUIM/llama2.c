@@ -4,12 +4,17 @@ import json, math, os, sys, statistics
 import lab
 
 def runs():
+    """Later entries win, so a `remeasure` record supersedes the original `run`."""
     rows = {}
     for line in open(lab.JOURNAL_JL):
         d = json.loads(line)
-        if d.get("kind") == "run" and "val_bpb" in (d.get("m") or {}):
-            m = dict(d["m"]); m["_hyp"] = d.get("hypothesis", ""); m["_verdict"] = d.get("verdict", "")
-            m["_wave"] = d.get("wave"); rows[m["id"]] = m
+        if d.get("kind") in ("run", "remeasure") and "val_bpb" in (d.get("m") or {}):
+            m = dict(d["m"])
+            prev = rows.get(m["id"], {})
+            m["_hyp"] = d.get("hypothesis", "") or prev.get("_hyp", "")
+            m["_verdict"] = d.get("verdict", "") or prev.get("_verdict", "")
+            m["_wave"] = d.get("wave", prev.get("_wave"))
+            rows[m["id"]] = m
     return rows
 
 def baseline_stats(rows):
@@ -53,12 +58,14 @@ def main():
     print("=" * 100)
     print("ALL RUNS  (val_bpb | params | unique weight bytes/token | state bytes/token | MACs/token | tok/s | peak RSS)")
     print("=" * 100)
-    hdr = "%-18s %-11s %8s %10s %11s %10s %10s %8s %8s %6s" % (
-        "id", "arch", "bpb", "params", "uB/tok", "sB/tok", "MACs/tok", "tok/s", "rssKB", "cons")
+    hdr = "%-18s %-11s %8s %10s %11s %11s %9s %10s %8s %7s %5s" % (
+        "id", "arch", "bpb", "params", "uB/tok", "ws16", "sB/tok", "MACs/tok",
+        "tok/s", "rssKB", "cons")
     print(hdr); print("-" * len(hdr))
     for r in sorted(R.values(), key=lambda x: x["val_bpb"]):
-        print("%-18s %-11s %8.4f %10d %11d %10d %10d %8.0f %8d %6s" % (
+        print("%-18s %-11s %8.4f %10d %11d %11s %9d %10d %8.0f %7d %5s" % (
             r["id"], r["arch"], r["val_bpb"], r["params"], r["wbytes_per_tok"],
+            (str(r["working_set_16tok"]) if "working_set_16tok" in r else "-"),
             r.get("sbytes_per_tok", 0), r.get("macs_per_tok", 0), r["tok_per_sec"],
             r["peak_rss_kb"], "ok" if r["consistency"] < 1e-3 else "BAD"))
 

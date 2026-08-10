@@ -329,7 +329,7 @@ int main(int argc,char**argv){
     if(jsonp){ FILE*j=fopen(jsonp,"w");
       fprintf(j,"{\"arch\":\"%s\",\"params\":%lld,\"stored_bytes\":%.0f,\"train_loss\":%.5f,"
                 "\"val_loss\":%.5f,\"val_bpb\":%.5f,\"train_sec\":%.1f,\"steps\":%d,\"bs\":%d,\"seq\":%d,"
-                "\"lr\":%g,\"seed\":%d,\"tokens_seen\":%lld,\"tok_per_block\":%.3f}\n",
+                "\"lr\":%g,\"seed\":%d,\"tokens_seen\":%lld,\"tok_per_block\":%.3f,\"frac_fast\":%.4f}\n",
         archname,params_count(),params_bytes(),lastloss,vl,vl/0.6931472,ttrain,steps,B,T,lr,seed,
         (long long)steps*B*T,g_tpb,g_ffast);
       fclose(j); }
@@ -343,34 +343,20 @@ int main(int argc,char**argv){
     A->cache_alloc(&c,c.seq_len+gen+8);
     g_train=0;
 
-    /* ---- consistency: cached decode must reproduce the full-seq forward ---- */
-    int TT = 64; int *xs=malloc(sizeof(int)*TT);
-    for(int i=0;i<TT;i++) xs[i]= (i==0)?256:(int)PROMPTBUF[i];
-    arena_reset(); tape_reset();
-    Tensor *full=A->fwd(&c,xs,1,TT,0,0);
-    int LW=full->shape[1];              /* K*vocab for multi-head archs */
-    float *ref=malloc(sizeof(float)*TT*LW);
-    memcpy(ref,full->d,sizeof(float)*TT*LW);
-    A->cache_reset(&c);
     double maxdiff=0;
-    for(int t=0;t<TT;t++){
-      arena_reset(); tape_reset();
-      Tensor *st=A->fwd(&c,&xs[t],1,1,t,1);
-      for(int i=0;i<LW;i++){ double d=fabs(st->d[i]-ref[(size_t)t*LW+i]); if(d>maxdiff) maxdiff=d; }
-    }
-    free(ref);free(xs);
 
     /* ---- measured decode: bytes, speed ---- */
 #ifdef _OPENMP
     omp_set_num_threads(1);
 #endif
-    double best_tps=0; long long wb=0,sb=0,fl=0,wu=0,fl2=0; double ffast=0;
+    double best_tps=0; long long wb=0,sb=0,fl=0,wu=0,ww=0; double ffast=0;
+    const int WINW=16;   /* window for the working-set measurement */
     char text[8192]; int tn=0,textlen=0;
     for(int rep=0;rep<repeats;rep++){
       A->cache_reset(&c);
       int tokn=256; /* BOS */
       /* warmup / prompt */
-      g_wbytes=0; g_sbytes=0; g_flops=0; long long uniq=0;
+      g_wbytes=0; g_sbytes=0; g_flops=0; long long uniq=0, wwin=0; int nwin=0;
       double t0=0; int nmeas=0; tn=0; (void)nmeas;
       /* K-token emission, matching what eval_val scores.
          A block boundary at position p yields tokens p+1..p+K from heads 0..K-1.
@@ -393,7 +379,7 @@ int main(int argc,char**argv){
            weight touches are counted ONCE -- the batched-pass cost. */
         static int hist[8192]; hist[0]=256; int tp=0;
         g_casc_mode=2; arena_reset(); tape_reset();
-        Tensor *fl=A->fwd(&c,&hist[0],1,1,0,1);
+        Tensor *bigl=A->fwd(&c,&hist[0],1,1,0,1);
         wbytes_unique_step();
         long long nfast=0;
         for(int i=1;i<=gen;i++){
@@ -401,6 +387,7 @@ int main(int argc,char**argv){
           g_casc_mode=1; arena_reset(); tape_reset();
           Tensor *fa=A->fwd(&c,&hist[i-1],1,1,i-1,1);
           long long ub=wbytes_unique_step();
+          if(i%WINW==0){ long long w=wbytes_window_flush(); if(t0!=0){ wwin+=w; nwin++; } }
           float mx=fa->d[0]; for(int q=1;q<c.vocab;q++) if(fa->d[q]>mx) mx=fa->d[q];
           double sm=0; for(int q=0;q<c.vocab;q++) sm+=exp((double)fa->d[q]-mx);
           int nx;
@@ -408,10 +395,10 @@ int main(int argc,char**argv){
           else{
             g_casc_mode=2;
             for(int p=tp+1;p<=i-1;p++){ arena_reset(); tape_reset();
-              fl=A->fwd(&c,&hist[p],1,1,p,1); }
+              bigl=A->fwd(&c,&hist[p],1,1,p,1); }
             tp=i-1;
             ub += wbytes_unique_step();
-            nx=sample_tok(fl->d,c.vocab,0.85f,1.0f);
+            nx=sample_tok(bigl->d,c.vocab,0.85f,1.0f);
           }
           hist[i]=nx;
           if(rep==0 && tn<(int)sizeof(text)-2 && nx<256) text[tn++]=(char)nx;
@@ -421,7 +408,7 @@ int main(int argc,char**argv){
         if(nmeas==0) nmeas=1;
         double el=now_sec()-t0; double tps=nmeas/el;
         if(tps>best_tps){ best_tps=tps; wb=g_wbytes/nmeas; sb=g_sbytes/nmeas;
-                          fl2=g_flops/nmeas; wu=uniq/nmeas; ffast=(double)nfast/gen; }
+                          fl=g_flops/nmeas;  wu=uniq/nmeas; ww=nwin?wwin/nwin:0; ffast=(double)nfast/gen; }
         if(rep==0) textlen=tn;
         continue;
       }
@@ -452,24 +439,47 @@ int main(int argc,char**argv){
         pos+=nb;
         long long u=wbytes_unique_step();        /* once per block, not per sub-pass */
         if(t0!=0) uniq+=u;
+        if((pos/WINW)!=((pos-nb)/WINW)){ long long w=wbytes_window_flush(); if(t0!=0){ wwin+=w; nwin++; } }
         tokn=blk[nb-1];
       }
       if(nmeas==0) nmeas=1;
       double el=now_sec()-t0; double tps=nmeas/el;
-      if(tps>best_tps){ best_tps=tps; wb=g_wbytes/nmeas; sb=g_sbytes/nmeas; fl=g_flops/nmeas; wu=uniq/nmeas; }
-      if(fl2) fl=fl2;
+      if(tps>best_tps){ best_tps=tps; wb=g_wbytes/nmeas; sb=g_sbytes/nmeas; fl=g_flops/nmeas; wu=uniq/nmeas; ww=nwin?wwin/nwin:0; }
       if(rep==0) textlen=tn;
     }
     text[textlen]=0;
+    /* RSS is read HERE, before the consistency check runs: the deployment
+       footprint is single-step decoding, and the check's full-sequence forward
+       would add an architecture-dependent slab of arena pages to VmHWM. */
     long rss=peak_rss_kb();
-    fprintf(stderr,"consistency=%.2e  uniqB/tok=%lld  trafficB/tok=%lld  sbytes/tok=%lld  tok/s=%.1f  rssKB=%ld\n",
-            maxdiff,wu,wb,sb,best_tps,rss);
+
+    /* ---- consistency: cached decode must reproduce the full-seq forward ---- */
+    {
+      int TT=64; int *xs=malloc(sizeof(int)*TT);
+      for(int i=0;i<TT;i++) xs[i]=(i==0)?256:(int)PROMPTBUF[i];
+      g_casc_mode=0;
+      arena_reset(); tape_reset();
+      Tensor *full=A->fwd(&c,xs,1,TT,0,0);
+      int LW=full->shape[1];
+      float *ref=malloc(sizeof(float)*TT*LW);
+      memcpy(ref,full->d,sizeof(float)*TT*LW);
+      A->cache_reset(&c);
+      for(int t=0;t<TT;t++){
+        arena_reset(); tape_reset();
+        Tensor *st=A->fwd(&c,&xs[t],1,1,t,1);
+        for(int i=0;i<LW;i++){ double d=fabs(st->d[i]-ref[(size_t)t*LW+i]); if(d>maxdiff) maxdiff=d; }
+      }
+      free(ref); free(xs);
+    }
+    fprintf(stderr,"consistency=%.2e  uniqB/tok=%lld  ws16=%lld  trafficB/tok=%lld  sbytes/tok=%lld  tok/s=%.1f  rssKB=%ld\n",
+            maxdiff,wu,ww,wb,sb,best_tps,rss);
     fprintf(stderr,"--- sample ---\n%.600s\n--------------\n",text);
     if(jsonp){ FILE*j=fopen(jsonp,"w");
       fprintf(j,"{\"arch\":\"%s\",\"params\":%lld,\"stored_bytes\":%.0f,\"wbytes_per_tok\":%lld,"
-                "\"wtraffic_per_tok\":%lld,\"sbytes_per_tok\":%lld,\"macs_per_tok\":%lld,"
-                "\"tok_per_sec\":%.2f,\"peak_rss_kb\":%ld,\"consistency\":%.3e,\"gen\":%d,\"kout\":%d}\n",
-        archname,params_count(),params_bytes(),wu,wb,sb,fl,best_tps,rss,maxdiff,gen,KOUT);
+                "\"wtraffic_per_tok\":%lld,\"working_set_16tok\":%lld,\"sbytes_per_tok\":%lld,\"macs_per_tok\":%lld,"
+                "\"tok_per_sec\":%.2f,\"peak_rss_kb\":%ld,\"consistency\":%.3e,\"gen\":%d,\"kout\":%d,"
+                "\"frac_fast_decode\":%.4f}\n",
+        archname,params_count(),params_bytes(),wu,wb,ww,sb,fl,best_tps,rss,maxdiff,gen,KOUT,ffast);
       fclose(j); }
     { char pb[512]; snprintf(pb,sizeof pb,"%s.sample.txt",ckpt); FILE*sf=fopen(pb,"w"); if(sf){fputs(text,sf);fclose(sf);} }
     (void)prompt;

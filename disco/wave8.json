@@ -1,0 +1,81 @@
+{
+ "wave": 8,
+ "specs": [
+  {
+   "id": "w8_1layer",
+   "arch": "llama",
+   "args": {
+    "lr": 0.012,
+    "layers": 1
+   },
+   "hypothesis": "THE CONTROL WAVE 1 WAS MISSING. sharedloop scored 2.2603 and I called the prediction refuted, but I had no reference for what 63,872 parameters is WORTH. A one-layer baseline has 62,720 parameters -- within 2% of sharedloop -- and uses the very same block exactly once instead of five times. This is the only comparison that answers the question sharedloop was actually asking: does iterating a block five times buy anything over using it once? If the 1-layer model is worse than 2.2603, sharedloop's recurrence is doing real work and my verdict was mis-framed. If it is better, iterating a shared block is actively harmful.",
+   "pred_text": "62,720 params, 250,880 unique bytes/token, same grid cell as sharedloop. val_bpb in [2.20, 2.50]: I expect the 1-layer model to be WORSE than sharedloop, i.e. recurrence helps.",
+   "prediction": {
+    "params": 62720,
+    "wbytes": 250880,
+    "val_bpb": [
+     2.2,
+     2.5
+    ]
+   }
+  },
+  {
+   "id": "w8_novalue_nr",
+   "arch": "novalue",
+   "args": {
+    "lr": 0.012
+   },
+   "knobs": {
+    "vrope": 0
+   },
+   "hypothesis": "SEPARATES THE TWO EXPLANATIONS for wave 1's worst refutation. novalue attended over the ROTATED keys, so the value transported by a token depended on its absolute position -- the same word contributes a differently rotated vector depending on where it sits. That is a different failure from the one I hypothesised (that Wk cannot be both a similarity space and a value space). Attending over the PRE-RoPE keys removes the positional corruption and leaves only the objective conflict. The gap between this and 2.1251 measures how much of the damage was RoPE.",
+   "pred_text": "237,312 params, 949,248 unique bytes/token, unchanged. val_bpb in [1.85, 2.05]: most of the 2.1251 damage should be the rotation, not the shared projection.",
+   "prediction": {
+    "params": 237312,
+    "wbytes": 949248,
+    "val_bpb": [
+     1.85,
+     2.05
+    ]
+   }
+  },
+  {
+   "id": "w8_ema_convonly",
+   "arch": "emaconv",
+   "args": {
+    "lr": 0.012
+   },
+   "knobs": {
+    "mix": 1,
+    "convw": 4
+   },
+   "hypothesis": "MECHANISM ISOLATION for wave 2's biggest surprise. emaconv scored 1.6813, beating the baseline by 6 sigma while having no attention at all -- my prediction of [1.80,2.15] was refuted in the GOOD direction. The mixer has two parts: a width-4 depthwise causal convolution (strictly local) and a per-channel EMA (unbounded range, non-selective). This run keeps only the convolution. If a 4-tap local filter per channel is enough to beat attention here, then at this scale and budget attention is not buying retrieval, it is buying local smoothing, and the whole result is about byte-level text being locally determined.",
+   "pred_text": "248,672 params, ~994,688 unique bytes/token. val_bpb in [1.72, 1.90]: worse than the full mixer but I expect it still to land near the baseline.",
+   "prediction": {
+    "params": 248672,
+    "val_bpb": [
+     1.72,
+     1.9
+    ]
+   }
+  },
+  {
+   "id": "w8_ema_emaonly",
+   "arch": "emaconv",
+   "args": {
+    "lr": 0.012
+   },
+   "knobs": {
+    "mix": 2
+   },
+   "hypothesis": "The other half: keep only the per-channel EMA and delete the convolution. The EMA has unbounded range but cannot distinguish position at all -- it is a leaky running average with a learned per-channel time constant. If THIS alone is competitive, then almost none of the sequence structure a transformer computes is being used at this scale. If it collapses while conv-only survives, the useful ingredient is locality, not range.",
+   "pred_text": "247,392 params. val_bpb in [1.95, 2.40]: I expect the EMA alone to be clearly the weaker half.",
+   "prediction": {
+    "val_bpb": [
+     1.95,
+     2.4
+    ]
+   }
+  }
+ ]
+}

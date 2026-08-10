@@ -3,6 +3,7 @@
  */
 #include "model.h"
 
+static int g_route_mode = 0;   /* routing-mode control, see route_of() below */
 float cfg_get(Cfg *c,const char*k,float d){ for(int i=0;i<c->nknob;i++) if(!strcmp(c->kname[i],k)) return c->kval[i]; return d; }
 int   cfg_geti(Cfg *c,const char*k,int d){ return (int)cfg_get(c,k,(float)d); }
 
@@ -141,6 +142,7 @@ static Hash Hh;
 static void hash_build(Cfg*c){
   int D=c->dim,H=c->hidden_dim,V=c->vocab,hd=D/c->n_heads,kvd=c->n_kv_heads*hd; char b[48];
   Hh.K=cfg_geti(c,"experts",4); if(Hh.K>MAXEXP) Hh.K=MAXEXP; Hh.last_tok=256;
+  g_route_mode=cfg_geti(c,"route",0);
   Hh.emb=P_new("emb",2,V,D,0,0); params_init_normal(Hh.emb,0.02f);
   for(int l=0;l<c->n_layers;l++){
     nm(b,"an",l); Hh.an[l]=P_new(b,1,D,0,0,0); params_init_ones(Hh.an[l]);
@@ -166,13 +168,27 @@ static void hash_cache_reset(Cfg*c){ for(int l=0;l<c->n_layers;l++) Hh.kv[l].len
 static inline int bigram_route(int cur,int prev,int K){
   unsigned h=(unsigned)cur*2654435761u ^ (unsigned)prev*40503u; h^=h>>13; return (int)(h%(unsigned)K);
 }
+/* CONTROL for the hashffn result: is the win from CONTENT-dependent routing, or
+   merely from owning more parameters and reading a slice of them?
+   route=0 bigram hash (content, context-sensitive)
+   route=1 position mod K   (content-INDEPENDENT: same parameter count, same read
+                             cost, same sparsity, but the route carries no
+                             information about the text)
+   route=2 unigram hash     (content, but no context) */
+static inline int route_of(int cur,int prev,int pos,int K){
+  switch(g_route_mode){
+    case 1: return pos % K;
+    case 2: { unsigned h=(unsigned)cur*2654435761u; h^=h>>13; return (int)(h%(unsigned)K); }
+    default: return bigram_route(cur,prev,K);
+  }
+}
 static Tensor *hash_fwd(Cfg*c,int*tok,int B,int T,int pos0,int uc){
   int D=c->dim,hd=D/c->n_heads,M=B*T,K=Hh.K;
   /* route each row; prev token comes from the sequence, or from decode state */
   static int rt[1<<16]; static int idx[MAXEXP][1<<16]; int cnt[MAXEXP];
   for(int b=0;b<B;b++)for(int t=0;t<T;t++){ int m=b*T+t;
     int prev = (t>0)? tok[m-1] : (uc? Hh.last_tok : 256);
-    rt[m]=bigram_route(tok[m],prev,K); }
+    rt[m]=route_of(tok[m],prev,pos0+t,K); }
   for(int e=0;e<K;e++) cnt[e]=0;
   for(int m=0;m<M;m++) idx[rt[m]][cnt[rt[m]]++]=m;
   if(uc) Hh.last_tok = tok[T-1];
@@ -248,15 +264,23 @@ static void nov_build(Cfg*c){
   L.fno=P_new("fno",1,D,0,0,0); params_init_ones(L.fno);
   if(c->tie) L.outw=L.emb; else { L.outw=P_new("outw",2,V,D,0,0); params_init_normal(L.outw,0.02f); }
 }
+/* knob vrope: 1 = attend over the ROTATED k (wave-1 behaviour), 0 = attend over
+   the pre-RoPE k.  Wave 1 refuted the prediction for this architecture badly
+   (2.1251 vs a predicted [1.78,1.92]) and there are two candidate explanations:
+   (a) Wk cannot serve as both a similarity space and a value space, and
+   (b) the value vectors were POSITION-ROTATED, so the same token transports
+       different content depending on where it sits.
+   Setting vrope=0 removes (b) and leaves (a), separating the two. */
 static Tensor *nov_fwd(Cfg*c,int*tok,int B,int T,int pos0,int uc){
-  int D=c->dim,hd=D/c->n_heads;
+  int D=c->dim,hd=D/c->n_heads; int vrope=cfg_geti(c,"vrope",1);
   Tensor *x=op_emb(L.emb,tok,B*T);
   for(int l=0;l<c->n_layers;l++){
     Tensor *h=op_rmsnorm(x,L.an[l]);
     Tensor *q=op_linear(h,L.wq[l]),*k=op_linear(h,L.wk[l]);
     q=op_rope(q,B,T,c->n_heads,hd,pos0,c->rope_theta);
+    Tensor *kraw=k;
     k=op_rope(k,B,T,c->n_kv_heads,hd,pos0,c->rope_theta);
-    Tensor *a=op_attn(q,k,k,B,T,c->n_heads,c->n_kv_heads,hd,uc?&L.kv[l]:NULL,0.f);
+    Tensor *a=op_attn(q,k,vrope?k:kraw,B,T,c->n_heads,c->n_kv_heads,hd,uc?&L.kv[l]:NULL,0.f);
     x=op_add(x,op_linear(a,L.wo[l]));
     Tensor *f=op_rmsnorm(x,L.fn[l]);
     Tensor *g=op_mul(op_act(op_linear(f,L.w1[l]),ACT_SILU),op_linear(f,L.w3[l]));
@@ -280,22 +304,26 @@ typedef struct {
   Tensor *an[MAXL],*wu[MAXL],*wg[MAXL],*kern[MAXL],*alpha[MAXL],*wo[MAXL];
   Tensor *fn[MAXL],*w1[MAXL],*w2[MAXL],*w3[MAXL];
   float *hist[MAXL],*st[MAXL];
-  int W;
+  int W, mix;      /* mix: 0 = conv+EMA, 1 = conv only, 2 = EMA only */
 } Ema;
 static Ema E;
 static void ema_build(Cfg*c){
   int D=c->dim,H=c->hidden_dim,V=c->vocab; char b[48];
   E.W=cfg_geti(c,"convw",4);
+  E.mix=cfg_geti(c,"mix",0);
+  int MW = (E.mix==0)? 2*D : D;   /* width of the mixer output fed to wo */
   E.emb=P_new("emb",2,V,D,0,0); params_init_normal(E.emb,0.02f);
   for(int l=0;l<c->n_layers;l++){
     nm(b,"an",l);  E.an[l]=P_new(b,1,D,0,0,0); params_init_ones(E.an[l]);
     nm(b,"wu",l);  E.wu[l]=P_new(b,2,D,D,0,0); params_init_normal(E.wu[l],0.02f);
     nm(b,"wg",l);  E.wg[l]=P_new(b,2,D,D,0,0); params_init_normal(E.wg[l],0.02f);
-    nm(b,"kern",l);E.kern[l]=P_new(b,2,D,E.W,0,0);
-      for(int d=0;d<D;d++) for(int j=0;j<E.W;j++) E.kern[l]->d[(size_t)d*E.W+j]=(j==0)?1.0f:rnd_normal()*0.1f;
-    nm(b,"alpha",l);E.alpha[l]=P_new(b,1,D,0,0,0);
-      for(int d=0;d<D;d++) E.alpha[l]->d[d]=1.0f+rnd_normal()*0.5f;   /* sigmoid ~ 0.73 */
-    nm(b,"wo",l);  E.wo[l]=P_new(b,2,D,2*D,0,0); params_init_normal(E.wo[l],0.02f);
+    if(E.mix!=2){ nm(b,"kern",l); E.kern[l]=P_new(b,2,D,E.W,0,0);
+      for(int d=0;d<D;d++) for(int j=0;j<E.W;j++) E.kern[l]->d[(size_t)d*E.W+j]=(j==0)?1.0f:rnd_normal()*0.1f; }
+    else E.kern[l]=NULL;
+    if(E.mix!=1){ nm(b,"alpha",l); E.alpha[l]=P_new(b,1,D,0,0,0);
+      for(int d=0;d<D;d++) E.alpha[l]->d[d]=1.0f+rnd_normal()*0.5f; }   /* sigmoid ~ 0.73 */
+    else E.alpha[l]=NULL;
+    nm(b,"wo",l);  E.wo[l]=P_new(b,2,D,MW,0,0); params_init_normal(E.wo[l],0.02f);
     nm(b,"fn",l);  E.fn[l]=P_new(b,1,D,0,0,0); params_init_ones(E.fn[l]);
     nm(b,"w1",l);  E.w1[l]=P_new(b,2,H,D,0,0); params_init_normal(E.w1[l],0.02f);
     nm(b,"w3",l);  E.w3[l]=P_new(b,2,H,D,0,0); params_init_normal(E.w3[l],0.02f);
@@ -317,9 +345,12 @@ static Tensor *ema_fwd(Cfg*c,int*tok,int B,int T,int pos0,int uc){
     Tensor *h=op_rmsnorm(x,E.an[l]);
     Tensor *u=op_linear(h,E.wu[l]);
     Tensor *gt=op_act(op_linear(h,E.wg[l]),ACT_SILU);
-    Tensor *cv=op_dwconv(u,E.kern[l],B,T,E.W,uc?E.hist[l]:NULL);
-    Tensor *em=op_ema(u,E.alpha[l],B,T,uc?E.st[l]:NULL);
-    Tensor *mix=op_mul(op_concat(cv,em),op_concat(gt,gt));
+    Tensor *mixv;
+    if(E.mix==1)      mixv=op_dwconv(u,E.kern[l],B,T,E.W,uc?E.hist[l]:NULL);
+    else if(E.mix==2) mixv=op_ema(u,E.alpha[l],B,T,uc?E.st[l]:NULL);
+    else              mixv=op_concat(op_dwconv(u,E.kern[l],B,T,E.W,uc?E.hist[l]:NULL),
+                                     op_ema(u,E.alpha[l],B,T,uc?E.st[l]:NULL));
+    Tensor *mix=op_mul(mixv, (E.mix==0)? op_concat(gt,gt) : gt);
     x=op_add(x,op_linear(mix,E.wo[l]));
     Tensor *f=op_rmsnorm(x,E.fn[l]);
     Tensor *g=op_mul(op_act(op_linear(f,E.w1[l]),ACT_SILU),op_linear(f,E.w3[l]));
@@ -507,9 +538,11 @@ static Tensor *mt_fwd(Cfg*c,int*tok,int B,int T,int pos0,int uc){
     x=op_add(x,op_linear(g,L.w2[l]));
   }
   x=op_rmsnorm(x,L.fno);
-  Tensor *out=op_linear(x,L.outw);                 /* head 0 */
+  int M=B*T, V=c->vocab;
+  Tensor *out=T_new(2,M,MT.K*V,0,0);                /* allocate the wide tensor ONCE */
+  op_place(out,op_linear(x,L.outw),0);              /* head 0 */
   for(int j=1;j<MT.K;j++)
-    out=op_concat(out,op_linear(op_linear(x,MT.ad[j]),L.outw));
+    op_place(out,op_linear(op_linear(x,MT.ad[j]),L.outw),j*V);
   return out;                                       /* [M, K*V] */
 }
 
@@ -625,6 +658,7 @@ static LoopX X;
 static void lx_build(Cfg*c){
   int D=c->dim,H=c->hidden_dim,V=c->vocab,hd=D/c->n_heads,kvd=c->n_kv_heads*hd; char b[48];
   X.K=cfg_geti(c,"experts",4); if(X.K>MAXEXP) X.K=MAXEXP; X.last_tok=256;
+  g_route_mode=cfg_geti(c,"route",0);
   X.emb=P_new("emb",2,V,D,0,0); params_init_normal(X.emb,0.02f);
   X.wq=P_new("wq",2,D,D,0,0);   params_init_normal(X.wq,0.02f);
   X.wk=P_new("wk",2,kvd,D,0,0); params_init_normal(X.wk,0.02f);
@@ -653,7 +687,7 @@ static Tensor *lx_fwd(Cfg*c,int*tok,int B,int T,int pos0,int uc){
   int D=c->dim,hd=D/c->n_heads,M=B*T,K=X.K;
   static int rt[1<<16]; static int idx[MAXEXP][1<<16]; int cnt[MAXEXP];
   for(int b=0;b<B;b++)for(int t=0;t<T;t++){ int m=b*T+t;
-    int prev=(t>0)?tok[m-1]:(uc?X.last_tok:256); rt[m]=bigram_route(tok[m],prev,K); }
+    int prev=(t>0)?tok[m-1]:(uc?X.last_tok:256); rt[m]=route_of(tok[m],prev,pos0+t,K); }
   for(int e=0;e<K;e++) cnt[e]=0;
   for(int m=0;m<M;m++) idx[rt[m]][cnt[rt[m]]++]=m;
   if(uc) X.last_tok=tok[T-1];
