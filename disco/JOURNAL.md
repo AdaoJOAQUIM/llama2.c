@@ -1700,3 +1700,119 @@ neither was checked. This is the result from the entire search I cannot fully ex
   tok/s) contains 18 of the 42 variants — the design space explored here is genuinely
   multi-dimensional; no single variant dominates on every axis simultaneously, which is
   the sign that the search was not accidentally collapsed onto one metric.
+
+---
+
+## Post-session addendum: a first, honest test of "separate the write path from the read path"
+
+A conversation after the main search asked what it would take to make continual
+learning industrially viable rather than a research curiosity. The argument made was
+that the blocker is not purely algorithmic but architectural: a system cannot be
+A/B-tested or rolled back if learning modifies the same weights that serve, so any
+viable design needs a **frozen core** plus a **separately writable store**, with
+writes gated (so as not to write everything) and measured on two axes: does a single
+online exposure genuinely help on a repeat of similar content (forward transfer), and
+does writing corrupt what the frozen core already knew (interference)?
+
+Rather than leave that as an unfalsifiable claim, the smallest honest version of it
+was built and measured, in the same style as the rest of this file: a hypothesis, a
+control for the first confound anyone would raise, and a result reported whether or
+not it was flattering.
+
+### What was built
+
+`mem.c`/`mem.h`: a hashed key -> byte-count table (`ctx` trailing bytes hash to one of
+`slots` rows; each row holds 257 saturating counters), **not part of the autodiff
+graph** — it is written directly by a rule at inference time, never by gradient
+descent. Two operations: `cache_mix` (linearly interpolate the core's softmax output
+with the row's empirical frequency distribution, weight `lambda`) and `cache_write`
+(increment a count, gated on `surprise = -log p_core(actual_next_byte)  > tau`, or
+unconditionally as a control).
+
+A new `memtest` mode in `main.c` (`stream_bpb`) walks a sequence causally one byte at
+a time — teacher-forced, so its bpb is directly comparable to `eval_val`'s — and runs
+four passes against the best model in the archive (`emaconv`, `w2_emaconv.bin`):
+
+1. **before** — the standard 24 held-out windows (same `val_offsets` seed used
+   throughout this file), cache absent, as a reference point.
+2. **pass1** — a single walk over a **121,898-byte gap in the corpus proven disjoint
+   from every val window** (computed by merging all 24 val window intervals and
+   taking the largest free gap: `[18,640,100, 18,762,000)`), with gated writes on.
+3. **pass2** — the identical bytes replayed, cache now populated from pass 1, no
+   further writes: forward transfer = pass1_bpb − pass2_bpb.
+4. **after** — the original 24 val windows again, cache still populated from the
+   adaptation walk, no writes: interference = after_bpb − before_bpb.
+
+Everything is run twice per lambda: once with surprise-gated writes, once with an
+unconditional-write control, at identical `lambda`.
+
+### The confound checked before trusting any number
+
+With `ctx=2` (a hashed byte-bigram, matching `ngrammem`'s and `hashffn`'s router
+convention) and only 16,384 slots against 257² ≈ 66,049 possible bigrams, the obvious
+worry is that "interference" is just hash-table crowding, not a real cross-region
+effect. Rerunning at `slots=65,536` (4x, near-injective for the bigram key space)
+changed the interference numbers by less than 0.0001 bpb — **the confound is ruled
+out**; the effect is a genuine content-level collision between the two disjoint
+regions' bigram statistics, not an artifact of table size.
+
+### The result: transfer is real, interference dominates it, and the gap widens
+
+| lambda | forward transfer (gated) | interference (gated) | interference / transfer |
+|---|---|---|---|
+| 0.10 | +0.0159 | +0.0334 | 2.1x |
+| 0.15 | +0.0194 | +0.0656 | 3.4x |
+| 0.30 | +0.0264 | +0.1948 | 7.4x |
+| 0.50 | +0.0322 | +0.4445 | 13.8x |
+
+Full detail at lambda=0.30 (the originally planned operating point):
+
+```
+before(no cache)      bpb=1.6964  (6144 tokens, 24 windows)
+--- gated (surprise>tau writes only, 27229/121898 = 22.3% of positions) ---
+pass1 bpb=1.7643   pass2 bpb=1.7379   forward_transfer=+0.0264
+after bpb=1.8912   interference=+0.1948
+--- control (unconditional writes, 100% of positions) ---
+pass1 bpb=1.6796   pass2 bpb=1.6622   forward_transfer=+0.0174
+after bpb=1.7976   interference=+0.1012
+```
+
+**Forward transfer is real at every lambda tested** — a single exposure to 122K bytes
+measurably reduces surprise on a second exposure to the same bytes, with no gradient
+step involved, which is the basic primitive continual learning needs. But
+**interference dominates it everywhere tested, and the ratio worsens super-linearly**,
+not linearly, as lambda increases: quadrupling lambda from 0.1 to 0.5 turns a
+2.1x-worse trade into a 13.8x-worse one. Even at the gentlest lambda tested (0.1),
+interference (0.0334 bpb) is roughly double the transfer benefit (0.0159 bpb) on a
+smaller, noisier 6,144-token reference sample than the 98,304-token one used
+throughout the rest of this file (a real limitation of this quick addendum, stated
+rather than hidden — the true noise floor on this smaller sample was not separately
+measured).
+
+**A second, unpredicted finding**: surprise-gating consistently interferes *more*
+than the unconditional-write control at matched lambda (0.1948 vs 0.1012 at
+lambda=0.3), despite writing to only 22% as many positions. The naive expectation
+going in was the opposite — that gating would concentrate writes on genuinely useful
+signal and reduce collateral damage. A plausible but **unverified** explanation:
+gated writes fire specifically on bytes the core found surprising, which by
+construction are the least typical, most idiosyncratic completions in the
+adaptation region; when a bigram collision lands in the disjoint validation region,
+that atypical count is a worse match for typical continuation than the smoothed,
+frequency-weighted distribution that unconditional writing accumulates. This was not
+tested and should not be taken as established.
+
+### Verdict against the plan's own acceptance bar
+
+The plan proposed this design specifically to achieve "write without hurting" —
+interference within noise of the frozen core's own baseline. **That bar was not met
+at any lambda tested here.** This is not evidence that separating the write path
+from the read path is a dead end; it is evidence that **the specific combination
+rule tested — a fixed-weight linear interpolation of raw hashed-bigram counts — is
+not it**. The clean next experiment this result points to, not run here: make the
+mixing weight a function of the cache row's own count mass (so a slot touched once
+by an atypical collision contributes near-zero weight, the way a proper
+back-off/Kneser-Ney-style cache model would) rather than a constant lambda regardless
+of how much or how reliably a slot has been written. That is a real, scoped,
+falsifiable next step — and, honestly, the fact that the first straightforward
+implementation failed its own acceptance criterion is a more useful data point than
+a demo that looked good on the one number that was checked.

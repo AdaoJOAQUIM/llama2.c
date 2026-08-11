@@ -10,6 +10,7 @@
  * fast decode path silently disagrees with what was trained, this number exposes it.
  */
 #include "model.h"
+#include "mem.h"
 #include <unistd.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -223,6 +224,47 @@ static int gradcheck(Arch*A,Cfg*c){
   return fail;
 }
 
+/* ---------------- online memory test ----------------
+ * A causal, single-token-at-a-time walk over one or more fixed windows,
+ * identical in spirit to the `infer` decode loop but teacher-forced (it reads
+ * the real next byte rather than sampling) so it produces a bpb number
+ * directly comparable to eval_val's.  `cache` may be NULL (pure core, no
+ * mixing).  `do_write` controls whether cache_write is called at each step.
+ * Returns mean bpb over every position in every window; *out_writes receives
+ * the write count if non-NULL.
+ */
+#define MAXCTX 4
+static double stream_bpb(Arch*A,Cfg*c,long*offs,int nwin,int T,
+                          Cache*cache,float lambda,double tau,int do_write,int gate_always,
+                          long long*out_writes){
+  int V=c->vocab; float*probs=malloc(sizeof(float)*V); float*mixed=malloc(sizeof(float)*V);
+  double tot=0; long long cnt=0, writes=0;
+  for(int w=0; w<nwin; w++){
+    A->cache_reset(c);
+    int ctxbuf[MAXCTX]; for(int i=0;i<MAXCTX;i++) ctxbuf[i]=256;
+    for(int t=0;t<T;t++){
+      int tok=(int)DATA[offs[w]+t];
+      for(int i=MAXCTX-1;i>0;i--) ctxbuf[i]=ctxbuf[i-1]; ctxbuf[0]=tok;
+      arena_reset(); tape_reset();
+      Tensor*lg=A->fwd(c,&tok,1,1,t,1);
+      float mx=lg->d[0]; for(int i=1;i<V;i++) if(lg->d[i]>mx) mx=lg->d[i];
+      double s=0; for(int i=0;i<V;i++){ probs[i]=expf(lg->d[i]-mx); s+=probs[i]; }
+      float inv=(float)(1.0/s); for(int i=0;i<V;i++) probs[i]*=inv;
+      int target=(int)DATA[offs[w]+t+1];
+      if(cache) cache_mix(cache,ctxbuf,probs,lambda,mixed); else memcpy(mixed,probs,sizeof(float)*V);
+      double p=mixed[target]; if(p<1e-30) p=1e-30;
+      tot += -log(p); cnt++;
+      if(cache && do_write){
+        double surprise = -log(probs[target]<1e-30?1e-30:probs[target]);
+        writes += cache_write(cache,ctxbuf,target,surprise,tau,gate_always);
+      }
+    }
+  }
+  free(probs); free(mixed);
+  if(out_writes) *out_writes=writes;
+  return cnt? (tot/cnt)/0.6931471805599453 : 0.0;   /* nats -> bits */
+}
+
 /* ---------------- main ---------------- */
 int main(int argc,char**argv){
   const char*mode = argc>1?argv[1]:"help";
@@ -232,6 +274,8 @@ int main(int argc,char**argv){
   int steps=2000,B=16,T=256,nvalb=24,gen=256,threads=4,seed=1337,warm=100,repeats=3,KOUT=1;
   float lr=1e-3f,wd=0.1f,minlr_frac=0.1f; size_t arena=1500ull<<20;
   const char*prompt=NULL;
+  float mlambda=0.3f; double mtau=2.0; int mslots=16384, mctx=2;
+  long mstart=18640100, mend=18762000;    /* the largest gap disjoint from every val_offsets window */
 
   for(int i=2;i<argc;i++){
     #define ARG(s) (!strcmp(argv[i],s) && i+1<argc)
@@ -257,6 +301,12 @@ int main(int argc,char**argv){
     else if(ARG("--repeats")) repeats=atoi(argv[++i]);
     else if(ARG("--arena")) arena=(size_t)atoll(argv[++i])<<20;
     else if(ARG("--prompt")) prompt=argv[++i];
+    else if(ARG("--mlambda")) mlambda=atof(argv[++i]);
+    else if(ARG("--mtau")) mtau=atof(argv[++i]);
+    else if(ARG("--mslots")) mslots=atoi(argv[++i]);
+    else if(ARG("--mctx")) mctx=atoi(argv[++i]);
+    else if(ARG("--mstart")) mstart=atol(argv[++i]);
+    else if(ARG("--mend")) mend=atol(argv[++i]);
     else if(ARG("--knob")){ /* name=value */
       char *kv=argv[++i],*eq=strchr(kv,'='); if(eq){ *eq=0;
         snprintf(c.kname[c.nknob],24,"%s",kv); c.kval[c.nknob]=atof(eq+1); c.nknob++; *eq='='; } }
@@ -502,10 +552,69 @@ int main(int argc,char**argv){
       fclose(j); }
     return 0;
   }
+  if(!strcmp(mode,"memtest")){
+    /* Online, writable, surprise-gated key->count cache bolted onto a frozen,
+     * already-trained core.  Not part of the autodiff graph (mem.c): it is
+     * written directly at inference time, which is the entire point -- it
+     * tests whether something can be written into a running system without
+     * touching the backprop-trained weights, and whether that write helps
+     * (forward transfer) without hurting (interference on the original
+     * validation set) -- the concrete, buildable slice of the "separate
+     * write path from read path" argument from the discussion in JOURNAL.md.
+     */
+    if(mctx>MAXCTX) mctx=MAXCTX;
+    arena_init(16ull<<20); A->build(&c); ckpt_load(ckpt); A->cache_alloc(&c,T+8);
+
+    long refoffs[256]; val_offsets(refoffs,nvalb,T*B+2);   /* same 24 windows used everywhere else */
+    long adaptoff[1]; adaptoff[0]=mstart;
+    int adaptT = (int)(mend-mstart-2); if(adaptT<64){fprintf(stderr,"adaptation gap too small\n");return 1;}
+
+    fprintf(stderr,"[memtest] arch=%s lambda=%.2f tau=%.2f slots=%d ctx=%d gap=[%ld,%ld) len=%d\n",
+            archname,mlambda,mtau,mslots,mctx,mstart,mend,adaptT);
+
+    double before = stream_bpb(A,&c,refoffs,nvalb,T,NULL,0,0,0,0,NULL);
+
+    Cache *cg = cache_new(mslots,c.vocab,mctx);          /* surprise-gated */
+    long long wg=0;
+    double pass1_g = stream_bpb(A,&c,adaptoff,1,adaptT,cg,mlambda,mtau,1,0,&wg);
+    double pass2_g = stream_bpb(A,&c,adaptoff,1,adaptT,cg,mlambda,mtau,0,0,NULL);
+    double after_g = stream_bpb(A,&c,refoffs,nvalb,T,cg,mlambda,mtau,0,0,NULL);
+
+    Cache *cu = cache_new(mslots,c.vocab,mctx);          /* control: write every token */
+    long long wu=0;
+    double pass1_u = stream_bpb(A,&c,adaptoff,1,adaptT,cu,mlambda,mtau,1,1,&wu);
+    double pass2_u = stream_bpb(A,&c,adaptoff,1,adaptT,cu,mlambda,mtau,0,1,NULL);
+    double after_u = stream_bpb(A,&c,refoffs,nvalb,T,cu,mlambda,mtau,0,1,NULL);
+
+    fprintf(stderr,"before(no cache)      bpb=%.4f  (%d tokens, %d windows)\n",before,T*nvalb,nvalb);
+    fprintf(stderr,"--- gated (surprise>tau writes only, %lld/%d = %.1f%% of positions) ---\n",
+            wg,adaptT,100.0*wg/adaptT);
+    fprintf(stderr,"pass1 (adapt stream, first exposure)   bpb=%.4f\n",pass1_g);
+    fprintf(stderr,"pass2 (same stream, second exposure)   bpb=%.4f   forward_transfer=%+.4f\n",pass2_g,pass1_g-pass2_g);
+    fprintf(stderr,"after (original val, cache populated)  bpb=%.4f   interference=%+.4f\n",after_g,after_g-before);
+    fprintf(stderr,"--- control (unconditional writes, %lld/%d = 100%% of positions) ---\n",wu,adaptT);
+    fprintf(stderr,"pass1  bpb=%.4f\n",pass1_u);
+    fprintf(stderr,"pass2  bpb=%.4f   forward_transfer=%+.4f\n",pass2_u,pass1_u-pass2_u);
+    fprintf(stderr,"after  bpb=%.4f   interference=%+.4f\n",after_u,after_u-before);
+
+    if(jsonp){ FILE*j=fopen(jsonp,"w");
+      fprintf(j,"{\"arch\":\"%s\",\"params\":%lld,\"mlambda\":%g,\"mtau\":%g,\"mslots\":%d,\"mctx\":%d,"
+                "\"adapt_len\":%d,\"before_bpb\":%.5f,"
+                "\"gated_writes\":%lld,\"gated_pass1_bpb\":%.5f,\"gated_pass2_bpb\":%.5f,\"gated_after_bpb\":%.5f,"
+                "\"gated_forward_transfer\":%.5f,\"gated_interference\":%.5f,"
+                "\"ungated_writes\":%lld,\"ungated_pass1_bpb\":%.5f,\"ungated_pass2_bpb\":%.5f,\"ungated_after_bpb\":%.5f,"
+                "\"ungated_forward_transfer\":%.5f,\"ungated_interference\":%.5f}\n",
+        archname,params_count(),mlambda,mtau,mslots,mctx,adaptT,before,
+        wg,pass1_g,pass2_g,after_g,pass1_g-pass2_g,after_g-before,
+        wu,pass1_u,pass2_u,after_u,pass1_u-pass2_u,after_u-before);
+      fclose(j); }
+    cache_free(cg); cache_free(cu);
+    return 0;
+  }
   if(!strcmp(mode,"eval")){
     arena_init(arena); A->build(&c); ckpt_load(ckpt);
     double vl=eval_val(A,&c,nvalb,B,T,KOUT,TAU);
     printf("val_loss %.5f bpb %.5f\n",vl,vl/0.6931472); return 0;
   }
-  fprintf(stderr,"usage: disco {train|infer|eval|gradcheck|list} [opts]\n"); return 1;
+  fprintf(stderr,"usage: disco {train|infer|eval|memtest|gradcheck|list} [opts]\n"); return 1;
 }
