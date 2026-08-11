@@ -2016,3 +2016,83 @@ iteration would have been unnecessary. The rule that follows is not "always reus
 but: **reuse the idea, own the measurement.** The literature is the cheapest source
 of next hypotheses available, and on this evidence it outperformed local search --
 one published insight beat two rounds of my own iteration on the same harness.
+
+---
+
+## Wave 11: does combination beat invention? — orthostack
+
+Prompted by the observation that the historic breakthroughs (Transformer, AlphaGo,
+FunSearch) invented no new bricks, only combined existing ones. This archive has a
+data point against naive combination — `loopexpert` (sharedloop + hashffn) scored
+1.9439, worse than the baseline and far worse than hashffn alone — and the diagnosis
+offered at the time was that **both parents attacked the same resource** (parameter
+economy) and therefore competed.
+
+That yields a testable criterion: **bricks compose when they touch different
+components.** The three architectures that beat the baseline in this search do
+exactly that — `emaconv` replaces the token mixer, `hashffn` replaces the FFN,
+`ngrammem` injects into the residual stream. None shares a component with another.
+
+`orthostack` stacks all three, with the memory on a knob so its marginal
+contribution is isolable.
+
+**Hypotheses, recorded before launching:**
+
+- **H1 (composition).** emaconv + hashffn touch different components, so they should
+  compose largely additively. Predicted mem=0 in **[1.58, 1.65]**.
+- **H2 (redundancy).** emaconv's win is known to come mostly from its 4-tap *local*
+  convolution (`w8_ema_convonly` = 1.7032 alone), and ngrammem is *also* a local
+  byte-statistics mechanism. So despite being worth −0.075 standalone, stacking it
+  should add **< 0.03**.
+
+### Results (2 seeds each)
+
+| variant | seed 1337 | seed 2 | mean | params | uB/tok | sB/tok | tok/s | consistency |
+|---|---|---|---|---|---|---|---|---|
+| mem=0 (2 bricks) | 1.6109 | 1.5975 | **1.6042** | 776,512 | 1,078,528 | 5,120 | 22,294 | 6.7e-06 |
+| mem=1 (3 bricks) | 1.5454 | 1.5455 | **1.5454** | 1,038,976 | 1,080,064 | 5,120 | 21,596 | 3.8e-06 |
+
+**H1: CONFIRMED.** mem=0 landed at 1.6109, inside the predicted [1.58, 1.65].
+
+**H2: REFUTED.** The memory adds **0.0588 bpb** (2-seed means), 2.1x the 0.0285
+noise floor — not the <0.03 predicted. `ngrammem` is genuinely complementary to the
+convolution, not redundant with it.
+
+### Additivity, which is the actual finding
+
+Standalone gains against the 1.7693 baseline: emaconv −0.0918, hashffn −0.0816,
+ngrammem −0.0751. Naive sum: **−0.2485**.
+
+| | measured gain | % of additive prediction |
+|---|---|---|
+| 2 bricks (mem=0) | −0.1651 | **95.2%** |
+| 3 bricks (mem=1) | −0.2239 | **90.1%** |
+
+Three mechanisms discovered independently, each individually modest, stack with
+~90% of their gains preserved. `orthostack` at 1.04M parameters beats `hashffn8` at
+1.43M (1.5454 vs 1.6369) while carrying **33x less decode state** (5,120 constant
+bytes, no KV cache at all) and running **1.5x faster** than the baseline.
+
+### Why H2 was wrong
+
+The refinement offered before the run — that the right criterion is "failure modes"
+rather than "components" — was an over-complication, and the coarse component-level
+criterion turned out to be sufficient. The specific error: conv and memory table were
+treated as the same mechanism because both read *locally*. They read locally but they
+**store** differently. A convolution learns one filter shared across every context;
+a lookup table learns one entry per context. Same range, orthogonal capacity.
+
+### What this does and does not establish
+
+It supports the combination thesis strongly at this scale: the component-level
+criterion predicted both the success (H1, inside a pre-registered interval) and, by
+its own logic, would have predicted H2 correctly had it not been overridden by a
+mechanism-level intuition that was wrong.
+
+It does not make composition free: `loopexpert` still failed, and it failed exactly
+where the criterion says it should — two parents competing for one resource.
+
+And none of the three bricks is novel. `emaconv` ≈ MEGA, `hashffn` ≈ Hash Layers,
+`ngrammem` ≈ product-key memory. The contribution here is not the bricks but the
+**measurement that says which ones compose** — which is the same conclusion this
+project keeps arriving at from every direction.

@@ -505,5 +505,39 @@
   "note": "",
   "sample": " thes smila gane and nreenes faooy  toe whit es.\nThmy vely tough  stading wan his bridten. They vely on, It soid,, she could molger pucded the burol andns bick milk a ban wor soul tugy a pard. Thme was had fun mot had ocegt and that wae hap the mastes th w",
   "flags": []
+ },
+ "8,7": {
+  "arch": "orthostack",
+  "params": 1038976,
+  "stored_bytes": 4155904,
+  "train_loss": 1.10603,
+  "val_loss": 1.07118,
+  "val_bpb": 1.54538,
+  "train_sec": 272.3,
+  "steps": 800,
+  "bs": 16,
+  "seq": 256,
+  "lr": 0.012,
+  "seed": 1337,
+  "tokens_seen": 3276800,
+  "tok_per_block": 1.0,
+  "frac_fast": 0.0,
+  "wbytes_per_tok": 1080064,
+  "wtraffic_per_tok": 1080320,
+  "working_set_16tok": 3111232,
+  "sbytes_per_tok": 5120,
+  "macs_per_tok": 267328,
+  "tok_per_sec": 21595.98,
+  "peak_rss_kb": 10476,
+  "consistency": 3.815e-06,
+  "gen": 256,
+  "kout": 1,
+  "frac_fast_decode": 0.0,
+  "id": "w11_ortho_mem1",
+  "knobs": {
+   "mem": 1,
+   "experts": 4,
+   "convw": 4
+  }
  }
 }
