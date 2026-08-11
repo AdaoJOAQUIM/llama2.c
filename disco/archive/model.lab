@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""LAB/1 -- executable knowledge object.
+
+  ./model.lab status              what is known, and with what confidence
+  ./model.lab frontier            the behaviour frontier (best per niche)
+  ./model.lab ledger              every prediction ever made, and its verdict
+  ./model.lab open                questions this file cannot currently answer
+  ./model.lab preregister ID LO HI ARCH [k=v ...]     declare BEFORE running
+  ./model.lab run ID                                   execute; verdict is forced
+  ./model.lab challenge ID                             re-verify an old claim
+  ./model.lab materialize ID                           rebuild weights, hash-checked
+"""
+import hashlib,os,re,statistics,subprocess,sys,time
+SELF=os.path.abspath(__file__); ROOT=os.path.dirname(os.path.dirname(SELF))
+def rows(tag):
+    out=[]
+    for ln in open(SELF):
+        if ln.startswith(tag+"|"): out.append(ln.rstrip("\n").split("|")[1:])
+    return out
+def append(line):
+    """Append-only, but the data block lives inside a string literal, so new
+       lines splice in just before its terminator rather than after EOF."""
+    txt=open(SELF).read(); i=txt.rindex(chr(10)+chr(34)*3+chr(10))
+    open(SELF,"w").write(txt[:i+1]+line+chr(10)+txt[i+1:])
+def sha(p,n=None):
+    h=hashlib.sha256()
+    with open(p,'rb') as f:
+        for b in iter(lambda:f.read(1<<20),b''): h.update(b)
+    d=h.hexdigest(); return d[:n] if n else d
+SRC=["nn.c","nn.h","archs.c","main.c","mem.c","mem.h","model.h","Makefile"]
+def srch(n=16):
+    h=hashlib.sha256()
+    for s in SRC:
+        p=os.path.join(ROOT,s)
+        if os.path.exists(p): h.update(open(p,'rb').read())
+    return h.hexdigest()[:n]
+
+def noise():
+    n=rows("NOISE")[0]
+    return dict(metric=n[0],sd=float(n[1]),mean=float(n[2]),k=int(n[3]),minseeds=int(n[4]))
+def preds():
+    d={}
+    for r in rows("PRED"): d[r[0]]=dict(id=r[0],lo=float(r[1]),hi=float(r[2]),arch=r[3],knobs=r[4],ts=r[5])
+    return d
+def results():
+    d={}
+    for r in rows("RESULT"): d.setdefault(r[0],[]).append(dict(seed=int(r[1]),val=float(r[2]),sha=r[3]))
+    return d
+def verdicts():
+    d={}
+    for r in rows("VERDICT"): d[r[0]]=dict(id=r[0],status=r[1],margin=float(r[2]),note=r[3])
+    return d
+
+def judge(rid):
+    """The rule the file will not let you argue with."""
+    N=noise(); R=results().get(rid,[]); P=preds().get(rid)
+    if not P: return ("NO-PREREGISTRATION",0.0,"no prediction was declared before running")
+    if len(R)<N["minseeds"]:
+        return ("UNDERPOWERED",0.0,"%d/%d seeds"%(len(R),N["minseeds"]))
+    vals=[x["val"] for x in R]; m=statistics.mean(vals)
+    margin=N["mean"]-m                       # positive = better than baseline
+    thr=2*N["sd"]
+    inpred = P["lo"]<=m<=P["hi"]
+    if margin>thr:  st="WIN"
+    elif margin<-thr: st="LOSS"
+    else: st="INDISTINGUISHABLE"
+    note="mean %.4f vs baseline %.4f, margin %+.4f, threshold %.4f (2sd); prediction [%.2f,%.2f] %s"%(
+        m,N["mean"],margin,thr,P["lo"],P["hi"],"held" if inpred else "REFUTED")
+    return (st,margin,note)
+
+def cmd_status():
+    N=noise(); V=verdicts(); R=results()
+    print("LAB/1  %s"%SELF)
+    print("  corpus %s   source %s"%(rows("ENV")[0][0],srch()))
+    if rows("ENV")[0][0]!=sha(os.path.join(ROOT,"data/corpus.bin"),16):
+        print("  !! corpus differs from the one every claim was measured on")
+    if rows("ENV")[0][1]!=srch():
+        print("  !! source differs (%s recorded) -- claims are NOT replayable as-is"%rows("ENV")[0][1])
+    print("  metric %s   baseline %.4f   sd %.4f over %d seeds   win needs margin > %.4f"%(
+        N["metric"],N["mean"],N["sd"],N["k"],2*N["sd"]))
+    w=[k for k,v in V.items() if v["status"]=="WIN"]
+    i=[k for k,v in V.items() if v["status"]=="INDISTINGUISHABLE"]
+    l=[k for k,v in V.items() if v["status"]=="LOSS"]
+    print("  claims: %d earned, %d indistinguishable, %d refuted-worse, %d ids with data"%(len(w),len(i),len(l),len(R)))
+    for k in sorted(w,key=lambda x:-V[x]["margin"]): print("     WIN  %-22s %+.4f"%(k,V[k]["margin"]))
+def cmd_frontier():
+    print("behaviour frontier (best per niche; niche = params x unique weight bytes/token)")
+    for r in sorted(rows("FRONT"),key=lambda x:float(x[2])):
+        print("  %-12s %-22s %s=%s  params=%-9s bytes/tok=%-9s"%(r[0],r[1],noise()["metric"],r[2],r[3],r[4]))
+def cmd_ledger():
+    P=preds(); V=verdicts(); R=results(); hit=0; tot=0
+    print("%-22s %-14s %9s %-18s %s"%("id","predicted","measured","status","note"))
+    for k in sorted(P):
+        rr=R.get(k,[])
+        m=statistics.mean([x["val"] for x in rr]) if rr else float("nan")
+        v=V.get(k,{"status":"PENDING","note":""})
+        if rr:
+            tot+=1; hit+= 1 if P[k]["lo"]<=m<=P[k]["hi"] else 0
+        print("%-22s [%4.2f,%4.2f]   %9.4f %-18s %s"%(k,P[k]["lo"],P[k]["hi"],m,v["status"],v["note"][:60]))
+    if tot: print("\ncalibration: %d/%d predictions landed inside their declared interval (%.0f%%)"%(hit,tot,100*hit/tot))
+def cmd_open():
+    for r in rows("OPEN"): print("  ?  %s"%r[0])
+def cmd_prereg(a):
+    rid,lo,hi,arch=a[0],a[1],a[2],a[3]; kn=",".join(a[4:])
+    if rid in results(): print("REFUSED: %s already has results. A prediction written after seeing the answer is not a prediction."%rid); sys.exit(1)
+    if rid in preds():   print("REFUSED: %s already has a prediction; it cannot be revised."%rid); sys.exit(1)
+    append("PRED|%s|%s|%s|%s|%s|%s"%(rid,lo,hi,arch,kn,time.strftime("%Y-%m-%dT%H:%M:%S")))
+    print("pre-registered %s in [%s,%s]"%(rid,lo,hi))
+def cmd_run(a):
+    rid=a[0]; seeds=[int(x) for x in a[1:]] or [1337,2]
+    P=preds().get(rid)
+    if not P: print("REFUSED: no pre-registration for %s. Declare a prediction first."%rid); sys.exit(1)
+    for s in seeds:
+        ck=os.path.join(ROOT,"runs","lab_%s_s%d.bin"%(rid,s))
+        cmd=[os.path.join(ROOT,"disco"),"train","--arch",P["arch"],"--steps","800","--bs","16",
+             "--seq","256","--threads","2","--lr","0.012","--seed",str(s),"--ckpt",ck,"--arena","1200"]
+        for kv in P["knobs"].split(",") if P["knobs"] else []: cmd+=["--knob",kv]
+        js=ck+".json"; cmd+=["--json",js]
+        print("  running %s seed %d ..."%(rid,s)); subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,cwd=ROOT,check=True)
+        import json as J; v=J.load(open(js))["val_bpb"]
+        append("RESULT|%s|%d|%.5f|%s"%(rid,s,v,sha(ck)))
+        print("    val_bpb %.4f"%v)
+    st,mg,note=judge(rid)
+    append("VERDICT|%s|%s|%.5f|%s"%(rid,st,mg,note))
+    print("  VERDICT: %s  (%s)"%(st,note))
+    if st!="WIN": print("  (this file will not record it as a win; the threshold is its own measured noise)")
+def cmd_challenge(a):
+    rid=a[0]; R=results().get(rid)
+    if not R: print("no results for %s"%rid); sys.exit(1)
+    if rows("ENV")[0][1]!=srch():
+        print("CANNOT CHALLENGE: source has changed since these claims were measured.")
+        print("  recorded %s, current %s -- rebuild the recorded source or re-measure."%(rows("ENV")[0][1],srch())); sys.exit(2)
+    P=preds()[rid]; ok=True
+    for r in R:
+        ck=os.path.join(ROOT,"runs","lab_%s_s%d.bin"%(rid,r["seed"]))
+        cmd=[os.path.join(ROOT,"disco"),"train","--arch",P["arch"],"--steps","800","--bs","16","--seq","256",
+             "--threads","2","--lr","0.012","--seed",str(r["seed"]),"--ckpt","/tmp/lab_chal.bin","--arena","1200"]
+        for kv in P["knobs"].split(",") if P["knobs"] else []: cmd+=["--knob",kv]
+        subprocess.run(cmd,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,cwd=ROOT,check=True)
+        got=sha("/tmp/lab_chal.bin")
+        print("  seed %d expected %s"%(r["seed"],r["sha"][:16]))
+        print("           got      %s  %s"%(got[:16],"OK" if got==r["sha"] else "DIVERGED"))
+        ok &= (got==r["sha"])
+    print("  challenge %s"%("UPHELD" if ok else "FAILED -- this claim no longer reproduces"))
+def cmd_materialize(a):
+    rid=a[0]; R=results().get(rid)
+    if not R: print("no results for %s"%rid); sys.exit(1)
+    print("checkpoints for %s:"%rid)
+    for r in R:
+        ck=os.path.join(ROOT,"runs","lab_%s_s%d.bin"%(rid,r["seed"]))
+        st="present, hash ok" if os.path.exists(ck) and sha(ck)==r["sha"] else ("present, HASH MISMATCH" if os.path.exists(ck) else "absent -- run `challenge` to rebuild")
+        print("  seed %d  %s  %s"%(r["seed"],r["sha"][:16],st))
+C={"status":lambda a:cmd_status(),"frontier":lambda a:cmd_frontier(),"ledger":lambda a:cmd_ledger(),
+   "open":lambda a:cmd_open(),"preregister":cmd_prereg,"run":cmd_run,"challenge":cmd_challenge,
+   "materialize":cmd_materialize}
+a=sys.argv[1:] or ["status"]
+(C.get(a[0]) or (lambda x:print(__doc__)))(a[1:])
+
+_D = r"""
+# ==== LAB/1 DATA (append-only; nothing here is ever rewritten) ====
+ENV|40da699977f3c5cd|d092f18f3154ce12|byte-level TinyStories 19,183,414 tokens; 800 steps bs16 seq256 lr0.012
+NOISE|val_bpb|0.0159|1.7693|4|2
+FRONT|8,7|w11_ortho_mem1|1.5454|1038976|1080064
+FRONT|8,6|w3_hashffn8|1.6369|1430272|990208
+FRONT|4,7|w10_emaconv_s3|1.6669|269632|1078528
+FRONT|7,6|w1_hashffn|1.6760|754432|990208
+FRONT|4,6|w9_emaconv_h153|1.6765|247552|990208
+FRONT|6,6|w2_ngrammem|1.6863|510016|991744
+FRONT|7,8|w6_dense754|1.7102|754432|3017728
+FRONT|4,3|w4_q8all|1.7694|247552|249664
+FRONT|4,4|w2_deepgate|1.8682|247877|455196
+FRONT|3,3|w4_loopexpert|1.9439|165248|255488
+FRONT|3,5|w2_lowrankffn|2.0249|184832|739328
+FRONT|4,2|w4_q2all|2.1243|247552|64528
+FRONT|1,3|w8_1layer|2.2544|62720|250880
+FRONT|6,3|w7_casc_t20|2.4480|395104|133099
+FRONT|4,5|w7_adapt8_t50|2.5967|276224|706775
+PRED|w1_sharedloop|1.85|2.10|sharedloop||2026-08-10 21:07:56
+RESULT|w1_sharedloop|1337|2.26029|-
+PRED|w1_hashffn|1.60|1.72|hashffn|experts=4|2026-08-10 21:07:56
+RESULT|w1_hashffn|1337|1.67596|-
+PRED|w1_ternffn|1.85|2.05|ternffn|ffn_bpe=0.25|2026-08-10 21:07:56
+RESULT|w1_ternffn|1337|1.90972|-
+PRED|w1_novalue|1.78|1.92|novalue||2026-08-10 21:07:56
+RESULT|w1_novalue|1337|2.12509|-
+PRED|w2_emaconv|1.80|2.15|emaconv|convw=4|2026-08-10 21:17:43
+RESULT|w2_emaconv|1337|1.68134|-
+PRED|w2_ngrammem|1.62|1.74|ngrammem|nslot=4096|2026-08-10 21:17:43
+RESULT|w2_ngrammem|1337|1.68634|-
+PRED|w2_deepgate|1.75|1.85|deepgate|gbias=2.0|2026-08-10 21:17:43
+RESULT|w2_deepgate|1337|1.86819|-
+PRED|w2_lowrankffn|1.80|1.95|lowrankffn|rank=24|2026-08-10 21:17:43
+RESULT|w2_lowrankffn|1337|2.02486|-
+PRED|w3_multitok2|1.90|2.25|multitok|kout=2|2026-08-10 21:28:10
+RESULT|w3_multitok2|1337|2.30324|-
+PRED|w3_multitok4|2.25|2.75|multitok|kout=4|2026-08-10 21:28:10
+RESULT|w3_multitok4|1337|3.17233|-
+PRED|w3_hashffn8|1.55|1.70|hashffn|experts=8|2026-08-10 21:28:10
+RESULT|w3_hashffn8|1337|1.63695|-
+PRED|w4_q8all|1.76|1.84|quant|qattn=127,qemb=127,qffn=127|2026-08-10 21:37:56
+RESULT|w4_q8all|1337|1.76939|-
+PRED|w4_q2all|2.10|2.80|quant|qattn=1,qemb=1,qffn=1|2026-08-10 21:37:56
+RESULT|w4_q2all|1337|2.12432|-
+PRED|w4_kvshare|1.80|1.95|kvshare||2026-08-10 21:37:56
+RESULT|w4_kvshare|1337|1.83640|-
+PRED|w4_loopexpert|1.80|2.00|loopexpert|experts=4|2026-08-10 21:37:56
+RESULT|w4_loopexpert|1337|1.94387|-
+PRED|w6_hash_pos|1.78|2.00|hashffn|experts=4,route=1|2026-08-10 22:07:50
+RESULT|w6_hash_pos|1337|1.91992|-
+PRED|w6_hash_uni|1.68|1.78|hashffn|experts=4,route=2|2026-08-10 22:07:50
+RESULT|w6_hash_uni|1337|1.71823|-
+PRED|w6_hash_e2|1.69|1.76|hashffn|experts=2,route=0|2026-08-10 22:07:50
+RESULT|w6_hash_e2|1337|1.71397|-
+PRED|w6_dense754|1.58|1.70|llama||2026-08-10 22:07:50
+RESULT|w6_dense754|1337|1.71022|-
+PRED|w8_1layer|2.20|2.50|llama||2026-08-10 22:17:00
+RESULT|w8_1layer|1337|2.25441|-
+PRED|w8_novalue_nr|1.85|2.05|novalue|vrope=0|2026-08-10 22:17:00
+RESULT|w8_novalue_nr|1337|1.94748|-
+PRED|w8_ema_convonly|1.72|1.90|emaconv|convw=4,mix=1|2026-08-10 22:17:00
+RESULT|w8_ema_convonly|1337|1.70325|-
+PRED|w8_ema_emaonly|1.95|2.40|emaconv|mix=2|2026-08-10 22:17:00
+RESULT|w8_ema_emaonly|1337|1.77442|-
+PRED|w9_emaconv_h153|1.69|1.76|emaconv|convw=4,mix=0|2026-08-10 22:26:05
+RESULT|w9_emaconv_h153|1337|1.67649|-
+PRED|w3_multitok8|2.90|3.80|multitok|kout=8|2026-08-11 09:15:53
+RESULT|w3_multitok8|1337|3.77071|-
+PRED|w11_ortho_mem0|1.58|1.65|orthostack|convw=4,experts=4,mem=0|2026-08-11 16:24:26
+RESULT|w11_ortho_mem0|1337|1.61092|-
+PRED|w11_ortho_mem0_s2|1.58|1.65|orthostack|convw=4,experts=4,mem=0|2026-08-11 16:24:26
+RESULT|w11_ortho_mem0_s2|2|1.59749|-
+OPEN|Does the 90% additivity of orthostack survive at 10x parameters, or is it an artefact of a regime where every mechanism is starved?
+OPEN|val_bpb is improvable by a bigram hash table (ngrammem, +0.075 reproducible). What is this metric actually measuring, and what would a metric look like that a lookup table cannot move?
+OPEN|hashffn beats a dense model of identical parameter count that reads 3x more bytes per token (1.6760 vs 1.7102). Unexplained.
+OPEN|Every architecture in this archive is a published technique. Did the search find anything, or only rank prior art?
+PRED|ortho_e8|1.50|1.55|orthostack|mem=1,experts=8,convw=4|2026-08-11T17:02:23
+"""

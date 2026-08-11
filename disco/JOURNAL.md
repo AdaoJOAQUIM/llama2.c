@@ -2182,3 +2182,88 @@ order change breaks it, as the thread-count experiment shows), and loss of the c
 (the recipe references data it does not contain). Both are properties worth stating
 plainly, because a format like this is exactly the kind of thing that looks
 impressive until someone tries to replay it on different hardware.
+
+---
+
+## Wave 13: DR2 verified, and LAB/1 — a format whose unit is the epistemic state
+
+### First, the DR2 measurement that was pending
+
+A chained checkpoint series (200 / 400 / 600 / 800 from one 800-step horizon,
+each node continuing the previous) against a from-scratch control:
+
+```
+dr2_series_200 done: train done 88.5s
+dr2_series_400 done: train done 89.0s
+dr2_series_600 done: train done 83.0s
+dr2_series_800 done: train done 83.0s
+-> CHAINED == SCRATCH (bit-exact)
+```
+
+Four checkpoints for 800 steps of work instead of 200+400+600+800 = 2,000, and the
+final artifact is byte-identical to one trained in a single run. The derivation graph
+is sound. Exact resume required serialising Adam's moments **and** the RNG (batch
+order depends on it), and separating `--stopat` from `--steps` because the cosine
+schedule is a function of the total horizon, not of where you halt.
+
+### Then the honest verdict on DR1/DR2
+
+Challenged on whether any of this is new. It is not. **DR2 is Nix** — content-
+addressed derivations, a build DAG, memoisation, refusal to replay against changed
+inputs. Nix has done this since 2003, and I used its own word, "derivation", without
+noticing. Two rediscoveries in a row: the addendum-1 store was a cache LM from 2017,
+and the recipe format is a package manager.
+
+Worse, and this is the sharpest thing in this file: **the archive's best mechanisms
+include a bigram hash table.** `ngrammem` improves `val_bpb` by 0.075 reproducibly
+across three seeds. That is a genuine result *on this instrument*, and what it
+actually demonstrates is that **the metric this project invested most in can be moved
+by a lookup table**. An evaluator a bigram table can improve is not measuring
+understanding. The instrument is rigorous; the quantity it measures is weak.
+
+### LAB/1
+
+So rather than another artifact format, the object built here has a different unit.
+Every format above stores **conclusions**: safetensors and GGUF store weights, Nix
+stores how to rebuild them, MLflow stores that a run happened. None stores **the
+entitlement to the conclusion**.
+
+`archive/model.lab` is a single executable file (12.8 KB) carrying:
+- the measured noise floor (sd 0.0159 over 4 baseline seeds)
+- the behaviour frontier (14 niches)
+- every prediction ever made in this project, with its outcome
+- the open questions, including the two the project could not resolve
+- and its own interpreter
+
+The property I believe is unusual is that **it refuses to record a claim it has not
+earned**, and this is mechanical rather than advisory:
+
+```
+$ ./model.lab run sneaky_win
+REFUSED: no pre-registration for sneaky_win. Declare a prediction first.
+
+$ ./model.lab preregister w1_hashffn 1.60 1.72 hashffn experts=4
+REFUSED: w1_hashffn already has results. A prediction written after seeing
+         the answer is not a prediction.
+```
+
+A result becomes a `WIN` only if it clears the file's **own measured** 2σ
+(0.0318 bpb) over a minimum seed count; otherwise it is written down as
+`INDISTINGUISHABLE`, and that verdict is not overridable by the caller. `challenge`
+re-runs an old claim from its recipe and compares SHA-256, so a claim that has
+quietly stopped reproducing becomes detectable rather than inherited.
+
+It also reports something no experiment tracker does, because no experiment tracker
+requires the prediction first: **calibration. 16 of 27 predictions (59%) landed
+inside their declared interval.** That number is a property of the forecaster, not of
+the models, and it is the most useful single line in the file.
+
+### What LAB/1 is not
+
+It is not revolutionary and the docstring says so, listing its own prior art before a
+reader can. Pre-registration is a social convention in clinical trials and OSF; the
+contribution here is only that it is *enforced by the file rather than by a
+committee*. It does not make the underlying metric any better — `val_bpb` remains
+gameable by a lookup table, and LAB/1 will happily certify a bigram table as a WIN,
+because the rule it enforces is honesty about measurement, not wisdom about what to
+measure. Those are different problems, and only the first one is solved here.
