@@ -234,6 +234,7 @@ static int gradcheck(Arch*A,Cfg*c){
  * the write count if non-NULL.
  */
 #define MAXCTX 4
+static int g_keymode=0;   /* 0 = surface n-gram key, 1 = core-belief key */
 static double stream_bpb(Arch*A,Cfg*c,long*offs,int nwin,int T,
                           Cache*cache,float lambda,float kappa,double tau,
                           int do_write,int gate_always,uint32_t episode,
@@ -253,13 +254,30 @@ static double stream_bpb(Arch*A,Cfg*c,long*offs,int nwin,int T,
       double s=0; for(int i=0;i<V;i++){ probs[i]=expf(lg->d[i]-mx); s+=probs[i]; }
       float inv=(float)(1.0/s); for(int i=0;i<V;i++) probs[i]*=inv;
       int target=(int)DATA[offs[w]+t+1];
-      if(cache) cache_mix(cache,ctxbuf,probs,lambda,kappa,mixed);
+      /* KEY SELECTION.  Both keys are functions of the CONTEXT ONLY -- the belief
+         key reads the core's predictive distribution, which is computed before the
+         target is looked at -- so neither leaks the answer.
+         keymode 0: surface n-gram (the classic cache-LM key, Grave et al. 2017)
+         keymode 1: the core's own top-2 prediction + current byte, a cheap discrete
+                    stand-in for kNN-LM's hidden-state key (Khandelwal et al. 2020).
+                    Contexts where the model believes the same thing collapse to the
+                    same slot, so the store indexes "when you think X, it was Y"
+                    instead of "after these two bytes". */
+      int keybuf[MAXCTX];
+      if(g_keymode==0){ memcpy(keybuf,ctxbuf,sizeof(keybuf)); }
+      else{
+        int t1=0,t2=1; float p1=-1,p2=-1;
+        for(int i=0;i<V;i++){ if(probs[i]>p1){ p2=p1;t2=t1; p1=probs[i];t1=i; }
+                              else if(probs[i]>p2){ p2=probs[i];t2=i; } }
+        keybuf[0]=tok; keybuf[1]=t1; keybuf[2]=t2; keybuf[3]=0;
+      }
+      if(cache) cache_mix(cache,keybuf,probs,lambda,kappa,mixed);
       else      memcpy(mixed,probs,sizeof(float)*V);
       double p=mixed[target]; if(p<1e-30) p=1e-30;
       tot += -log(p); cnt++;
       if(cache && do_write){
         double surprise = -log(probs[target]<1e-30?1e-30:probs[target]);
-        writes += cache_write(cache,ctxbuf,target,surprise,tau,gate_always,episode);
+        writes += cache_write(cache,keybuf,target,surprise,tau,gate_always,episode);
       }
     }
   }
@@ -307,6 +325,7 @@ int main(int argc,char**argv){
     else if(ARG("--mlambda")) mlambda=atof(argv[++i]);
     else if(ARG("--mtau")) mtau=atof(argv[++i]);
     else if(ARG("--mkappa")) mkappa=atof(argv[++i]);
+    else if(ARG("--mkey")) g_keymode=atoi(argv[++i]);
     else if(ARG("--mslots")) mslots=atoi(argv[++i]);
     else if(ARG("--mctx")) mctx=atoi(argv[++i]);
     else if(ARG("--mstart")) mstart=atol(argv[++i]);
@@ -572,14 +591,15 @@ int main(int argc,char**argv){
      * which is the objection that keeps continual learning out of production.
      */
     if(mctx>MAXCTX) mctx=MAXCTX;
+    if(g_keymode==1) mctx=3;   /* belief key uses (cur, top1, top2) */
     arena_init(16ull<<20); A->build(&c); ckpt_load(ckpt); A->cache_alloc(&c,T+8);
 
     long refoffs[256]; val_offsets(refoffs,nvalb,T*B+2);   /* the same 24 windows used everywhere else */
     long adaptoff[1]; adaptoff[0]=mstart;
     int adaptT = (int)(mend-mstart-2); if(adaptT<64){fprintf(stderr,"adaptation gap too small\n");return 1;}
 
-    fprintf(stderr,"[memtest] arch=%s lambda_max=%.2f kappa=%.1f tau=%.2f slots=%d ctx=%d gap=[%ld,%ld) len=%d\n",
-            archname,mlambda,mkappa,mtau,mslots,mctx,mstart,mend,adaptT);
+    fprintf(stderr,"[memtest] arch=%s key=%s lambda_max=%.2f kappa=%.1f tau=%.2f slots=%d ctx=%d gap=[%ld,%ld) len=%d\n",
+            archname,g_keymode?"belief(top2)":"surface-ngram",mlambda,mkappa,mtau,mslots,mctx,mstart,mend,adaptT);
 
     double before = stream_bpb(A,&c,refoffs,nvalb,T,NULL,0,0,0,0,0,0,NULL);
     /* INSTRUMENT FIX: pass1 builds the store while it measures, so pass1-pass2 does

@@ -1934,3 +1934,85 @@ an episode can be rolled back to a bit-identical state.
 The useful thing an evaluator can say here is that the deployment property is solid
 and the learning benefit is not yet. That is the opposite ordering from what the
 usual demo shows, and it is the more honest one.
+
+---
+
+## Addendum 3: the literature had already answered this, and the answer flipped the sign
+
+Asked why any of this was being rebuilt when the bricks already exist and are
+published. The question is correct and the answer is measured below rather than
+argued.
+
+### What in this repo is a reinvention
+
+Every architecture in the archive is a known technique, and the "modifications" were
+modest:
+
+| this repo | prior work |
+|---|---|
+| `emaconv` (conv + per-channel EMA mixer) | MEGA (Ma et al. 2022) uses a per-channel EMA in exactly this role |
+| `hashffn` (hash-routed FFN experts) | Hash Layers (Roller et al. 2021) |
+| `ngrammem` (hashed table into the residual) | product-key memory (Lample et al. 2019) |
+| `multitok` (K heads, K tokens per pass) | Gloeckle et al. 2024; Medusa |
+| `cascade` (small model gates the big one) | speculative decoding / model cascades |
+| `quant` (row-wise ternary/int8, STE) | BitNet and the quantisation literature |
+| the addendum-1/2 store | cache LM (Grave et al. 2017) + Jelinek-Mercer smoothing (1980s) |
+
+### The cost of not looking it up first, measured
+
+kNN-LM (Khandelwal et al. 2020) reports that the useful key for an interpolated
+memory is the model's **own context representation**, not the surface n-gram --
+surface keys collide between semantically unrelated contexts. The store in addenda 1
+and 2 used a surface bigram key and failed in precisely that way.
+
+Implementing the published insight took ~30 lines: `--mkey 1` replaces the surface
+key `hash(prev, cur)` with `hash(cur, top1, top2)`, where top1/top2 are the frozen
+core's two most likely next bytes. This is a crude discrete stand-in for kNN-LM's
+continuous hidden-state key -- contexts in which the model believes the same thing
+collapse to the same slot, so the store indexes "when you think X, it was actually Y"
+rather than "after these two bytes". Both keys are functions of the context only
+(the core's distribution is computed before the target is read), so neither leaks
+the answer.
+
+Same core, same stream, same protocol, 24,576 validation tokens:
+
+| key | lambda | transfer | interference | occupied slots |
+|---|---|---|---|---|
+| surface n-gram | 0.05 | +0.0056 | +0.0004 | 547 |
+| surface n-gram | 0.30 | **−0.0185** | +0.0374 | 547 |
+| belief (top-2) | 0.05 | +0.0074 | −0.0011 | 1661 |
+| belief (top-2) | 0.30 | **+0.0072** | +0.0154 | 1661 |
+| belief, ungated writes | 0.30 | **+0.0166** | +0.0031 | 2525 |
+
+**The sign of the result flips.** At lambda=0.3 the surface key makes the adaptation
+stream worse (−0.0185); the belief key makes it better (+0.0072). The best
+configuration found anywhere in these three addenda is the belief key with
+unconditional writes: transfer **+0.0166** against interference **+0.0031**, a 5.4:1
+ratio in the right direction -- the first time the design's own bar is met with
+margin rather than at the resolution limit. Revocation remains exact (0.000e+00) in
+every one of these runs.
+
+The mechanism is visible in the last column: the belief key occupies 3-5x more slots
+from the identical write budget. It discriminates contexts the surface key was
+conflating, which is exactly the failure kNN-LM describes.
+
+### The honest rule this produces
+
+Reinventing was justified for exactly one thing here, and it is worth stating the
+criterion narrowly rather than as a defence of the whole exercise:
+
+> Build it yourself when **the measurement you need does not exist in the library**.
+
+This project's load-bearing metric is unique weight bytes touched per emitted token,
+with an inference path provably identical to the training path (`consistency == 0.0`).
+No framework exposes that; instrumenting one would have produced a less trustworthy
+number than owning every read in 700 lines of C. That choice paid for itself: six
+measurement bugs found, two of which (the `touch_all` short-circuit, and the
+addendum-1 transfer reference) would have produced publishable-looking false results.
+
+Everything else was reinvention with no such justification. Concretely: the store
+should have started from kNN-LM's key, not from a surface bigram, and two rounds of
+iteration would have been unnecessary. The rule that follows is not "always reuse"
+but: **reuse the idea, own the measurement.** The literature is the cheapest source
+of next hypotheses available, and on this evidence it outperformed local search --
+one published insight beat two rounds of my own iteration on the same harness.
