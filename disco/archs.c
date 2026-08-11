@@ -788,6 +788,109 @@ static Tensor *casc_fwd(Cfg*c,int*tok,int B,int T,int pos0,int uc){
   return op_concat(full,fast);                    /* [M, 2V] */
 }
 
+
+/* ================================================================= *
+ *  A14: orthostack -- the three winners of this search stacked, chosen
+ *  because they touch THREE DIFFERENT COMPONENTS and therefore should not
+ *  compete for the same resource:
+ *     mixer   <- emaconv   (depthwise causal conv + per-channel EMA, no attention)
+ *     FFN     <- hashffn   (K bigram-hash-routed experts, no router params)
+ *     residual<- ngrammem  (hashed bigram memory injected at every depth)  [knob mem=0/1]
+ *
+ *  This is the direct test of "combination, not invention".  The one earlier
+ *  recombination in this archive (loopexpert = sharedloop + hashffn, 1.9439)
+ *  FAILED, and it failed because both parents attacked the same resource --
+ *  parameter economy.  These three do not.
+ *
+ *  A sharper sub-hypothesis is testable with the mem knob: emaconv's win is
+ *  known to come mostly from its 4-tap LOCAL convolution (w8_ema_convonly
+ *  scored 1.7032 alone), and ngrammem is ALSO a local byte-statistics
+ *  mechanism.  If they are redundant, mem=1 should add little over mem=0,
+ *  even though ngrammem is worth -0.075 bpb on its own against the baseline.
+ * ================================================================= */
+typedef struct {
+  Tensor *emb,*outw,*fno,*mem;
+  Tensor *an[MAXL],*wu[MAXL],*wg[MAXL],*kern[MAXL],*alpha[MAXL],*wo[MAXL];
+  Tensor *fn[MAXL],*msc[MAXL];
+  Tensor *w1[MAXL][MAXEXP],*w2[MAXL][MAXEXP],*w3[MAXL][MAXEXP];
+  float *hist[MAXL],*st[MAXL];
+  int W,K,nslot,use_mem,last_tok;
+} Ortho;
+static Ortho O;
+static void o_build(Cfg*c){
+  int D=c->dim,H=c->hidden_dim,V=c->vocab; char b[48];
+  O.W=cfg_geti(c,"convw",4);
+  O.K=cfg_geti(c,"experts",4); if(O.K>MAXEXP) O.K=MAXEXP;
+  O.use_mem=cfg_geti(c,"mem",1);
+  O.nslot=cfg_geti(c,"nslot",4096);
+  O.last_tok=256;
+  O.emb=P_new("emb",2,V,D,0,0); params_init_normal(O.emb,0.02f);
+  if(O.use_mem){ O.mem=P_new("mem",2,O.nslot,D,0,0); params_init_normal(O.mem,0.02f); }
+  for(int l=0;l<c->n_layers;l++){
+    nm(b,"an",l);   O.an[l]=P_new(b,1,D,0,0,0); params_init_ones(O.an[l]);
+    nm(b,"wu",l);   O.wu[l]=P_new(b,2,D,D,0,0); params_init_normal(O.wu[l],0.02f);
+    nm(b,"wg",l);   O.wg[l]=P_new(b,2,D,D,0,0); params_init_normal(O.wg[l],0.02f);
+    nm(b,"kern",l); O.kern[l]=P_new(b,2,D,O.W,0,0);
+      for(int d=0;d<D;d++) for(int j=0;j<O.W;j++) O.kern[l]->d[(size_t)d*O.W+j]=(j==0)?1.0f:rnd_normal()*0.1f;
+    nm(b,"alpha",l);O.alpha[l]=P_new(b,1,D,0,0,0);
+      for(int d=0;d<D;d++) O.alpha[l]->d[d]=1.0f+rnd_normal()*0.5f;
+    nm(b,"wo",l);   O.wo[l]=P_new(b,2,D,2*D,0,0); params_init_normal(O.wo[l],0.02f);
+    nm(b,"fn",l);   O.fn[l]=P_new(b,1,D,0,0,0); params_init_ones(O.fn[l]);
+    if(O.use_mem){ nm(b,"msc",l); O.msc[l]=P_new(b,1,D,0,0,0); params_init_zeros(O.msc[l]); }
+    for(int e=0;e<O.K;e++){ char q[48];
+      sprintf(q,"w1.%d.%d",l,e); O.w1[l][e]=P_new(q,2,H,D,0,0); params_init_normal(O.w1[l][e],0.02f);
+      sprintf(q,"w3.%d.%d",l,e); O.w3[l][e]=P_new(q,2,H,D,0,0); params_init_normal(O.w3[l][e],0.02f);
+      sprintf(q,"w2.%d.%d",l,e); O.w2[l][e]=P_new(q,2,D,H,0,0); params_init_normal(O.w2[l][e],0.02f); }
+  }
+  O.fno=P_new("fno",1,D,0,0,0); params_init_ones(O.fno);
+  if(c->tie) O.outw=O.emb; else { O.outw=P_new("outw",2,V,D,0,0); params_init_normal(O.outw,0.02f); }
+}
+static void o_cache_alloc(Cfg*c,int ml){
+  (void)ml; int D=c->dim;
+  for(int l=0;l<c->n_layers;l++){ O.hist[l]=(float*)calloc((size_t)(O.W>1?O.W-1:1)*D,4); O.st[l]=(float*)calloc(D,4); }
+}
+static void o_cache_reset(Cfg*c){ int D=c->dim;
+  for(int l=0;l<c->n_layers;l++){ memset(O.hist[l],0,(size_t)(O.W>1?O.W-1:1)*D*4); memset(O.st[l],0,(size_t)D*4); }
+  O.last_tok=256; }
+static Tensor *o_fwd(Cfg*c,int*tok,int B,int T,int pos0,int uc){
+  (void)pos0;
+  int M=B*T,K=O.K;
+  static int rt[1<<16]; static int idx[MAXEXP][1<<16]; int cnt[MAXEXP];
+  static int slot[1<<16];
+  for(int b=0;b<B;b++)for(int t=0;t<T;t++){ int m=b*T+t;
+    int prev=(t>0)?tok[m-1]:(uc?O.last_tok:256);
+    rt[m]=bigram_route(tok[m],prev,K);
+    if(O.use_mem){ unsigned h=(unsigned)tok[m]*2654435761u ^ (unsigned)prev*2246822519u; h^=h>>15;
+                   slot[m]=(int)(h%(unsigned)O.nslot); } }
+  for(int e=0;e<K;e++) cnt[e]=0;
+  for(int m=0;m<M;m++) idx[rt[m]][cnt[rt[m]]++]=m;
+  if(uc) O.last_tok=tok[T-1];
+
+  Tensor *mv = O.use_mem? op_emb(O.mem,slot,M) : NULL;
+  Tensor *x=op_emb(O.emb,tok,M);
+  for(int l=0;l<c->n_layers;l++){
+    if(O.use_mem) x=op_add(x,op_mul(mv,op_addbias(op_scale(mv,0.f),O.msc[l])));
+    /* --- mixer: emaconv --- */
+    Tensor *h=op_rmsnorm(x,O.an[l]);
+    Tensor *u=op_linear(h,O.wu[l]);
+    Tensor *gt=op_act(op_linear(h,O.wg[l]),ACT_SILU);
+    Tensor *cv=op_dwconv(u,O.kern[l],B,T,O.W,uc?O.hist[l]:NULL);
+    Tensor *em=op_ema(u,O.alpha[l],B,T,uc?O.st[l]:NULL);
+    Tensor *mix=op_mul(op_concat(cv,em),op_concat(gt,gt));
+    x=op_add(x,op_linear(mix,O.wo[l]));
+    /* --- FFN: hash-routed experts --- */
+    Tensor *f=op_rmsnorm(x,O.fn[l]);
+    Tensor *acc=NULL;
+    for(int e=0;e<K;e++){ if(!cnt[e]) continue;
+      Tensor *fe=op_rows(f,idx[e],cnt[e]);
+      Tensor *g=op_mul(op_act(op_linear(fe,O.w1[l][e]),ACT_SILU),op_linear(fe,O.w3[l][e]));
+      Tensor *oe=op_scatter(op_linear(g,O.w2[l][e]),idx[e],cnt[e],M);
+      acc=acc?op_add(acc,oe):oe; }
+    x=op_add(x,acc);
+  }
+  return op_linear(op_rmsnorm(x,O.fno),O.outw);
+}
+
 /* ================================================================= *
  *  registry
  * ================================================================= */
@@ -820,6 +923,8 @@ Arch g_archs[] = {
    lx_build, lx_cache_alloc, lx_cache_reset, lx_fwd},
   {"cascade","tiny bigram model emits confident bytes; transformer only on demand",
    casc_build, llama_cache_alloc, casc_cache_reset, casc_fwd},
+  {"orthostack","emaconv mixer + hash-routed FFN + optional bigram memory (knob mem)",
+   o_build, o_cache_alloc, o_cache_reset, o_fwd},
 };
 int g_narchs = (int)(sizeof(g_archs)/sizeof(g_archs[0]));
 Arch *arch_find(const char*n){ for(int i=0;i<g_narchs;i++) if(!strcmp(g_archs[i].name,n)) return &g_archs[i]; return NULL; }
