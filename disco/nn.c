@@ -630,6 +630,24 @@ void tape_backward(void){
 
 /* ============================ optimizer ============================ */
 static AdamSlot g_slots[MAXPARAM];
+/* Serialise the FULL optimiser state so a run can be resumed exactly.
+   Params alone are not enough: Adam's moments AND the RNG (which drives batch
+   order) both determine every subsequent step. Omitting either makes a resumed
+   run diverge from an uninterrupted one, silently. */
+void opt_state_save(FILE*f,int step){
+  fwrite(&step,4,1,f); fwrite(&g_rng,8,1,f);
+  for(int i=0;i<g_nparams;i++){
+    fwrite(g_slots[i].m,4,g_params[i]->n,f);
+    fwrite(g_slots[i].v,4,g_params[i]->n,f); }
+}
+int opt_state_load(FILE*f){
+  int step=0; if(fread(&step,4,1,f)!=1) return -1;
+  if(fread(&g_rng,8,1,f)!=1) return -1;
+  for(int i=0;i<g_nparams;i++){
+    if(fread(g_slots[i].m,4,g_params[i]->n,f)!=(size_t)g_params[i]->n) return -1;
+    if(fread(g_slots[i].v,4,g_params[i]->n,f)!=(size_t)g_params[i]->n) return -1; }
+  return step;
+}
 void opt_init(void){ for(int i=0;i<g_nparams;i++){ g_slots[i].m=(float*)calloc(g_params[i]->n,sizeof(float));
                                                     g_slots[i].v=(float*)calloc(g_params[i]->n,sizeof(float)); } }
 void params_invalidate_q(void){ for(int i=0;i<g_nparams;i++) g_params[i]->qvalid=0; }

@@ -45,6 +45,15 @@ static void fill_batch(long off,int B,int T,int*x,int*y,int stride){
 }
 
 /* ---------------- checkpoint ---------------- */
+/* full = params + Adam moments + RNG + step, i.e. everything needed to resume */
+static void ckpt_save_full(const char*p,int step){
+  char q[600]; snprintf(q,sizeof q,"%s.state",p);
+  FILE*f=fopen(q,"wb"); if(!f) return; opt_state_save(f,step); fclose(f);
+}
+static int ckpt_load_full(const char*p){
+  char q[600]; snprintf(q,sizeof q,"%s.state",p);
+  FILE*f=fopen(q,"rb"); if(!f) return -1; int s=opt_state_load(f); fclose(f); return s;
+}
 static void ckpt_save(const char*p){
   FILE*f=fopen(p,"wb"); int magic=0xD15C0; fwrite(&magic,4,1,f); fwrite(&g_nparams,4,1,f);
   for(int i=0;i<g_nparams;i++){ fwrite(&g_params[i]->n,4,1,f); fwrite(g_params[i]->d,4,g_params[i]->n,f); }
@@ -294,7 +303,7 @@ int main(int argc,char**argv){
   const char*archname="llama",*ckpt="runs/m.bin",*jsonp=NULL,*data="data/corpus.bin";
   int steps=2000,B=16,T=256,nvalb=24,gen=256,threads=4,seed=1337,warm=100,repeats=3,KOUT=1;
   float lr=1e-3f,wd=0.1f,minlr_frac=0.1f; size_t arena=1500ull<<20;
-  const char*prompt=NULL;
+  const char*prompt=NULL; const char*resume=NULL; int savestate=0, stopat=0;
   float mlambda=0.3f, mkappa=0.0f; double mtau=2.0; int mslots=16384, mctx=2;
   long mstart=18640100, mend=18762000;    /* the largest gap disjoint from every val_offsets window */
 
@@ -326,6 +335,9 @@ int main(int argc,char**argv){
     else if(ARG("--mtau")) mtau=atof(argv[++i]);
     else if(ARG("--mkappa")) mkappa=atof(argv[++i]);
     else if(ARG("--mkey")) g_keymode=atoi(argv[++i]);
+    else if(ARG("--resume")) resume=argv[++i];
+    else if(ARG("--savestate")) savestate=atoi(argv[++i]);
+    else if(ARG("--stopat")) stopat=atoi(argv[++i]);   /* stop early, keep `steps` as the LR horizon */
     else if(ARG("--mslots")) mslots=atoi(argv[++i]);
     else if(ARG("--mctx")) mctx=atoi(argv[++i]);
     else if(ARG("--mstart")) mstart=atol(argv[++i]);
@@ -359,13 +371,21 @@ int main(int argc,char**argv){
   if(!strcmp(mode,"train")){
     arena_init(arena);
     A->build(&c); opt_init();
+    int step0=0;
+    if(resume){                     /* continue an earlier run exactly */
+      ckpt_load(resume);
+      step0=ckpt_load_full(resume);
+      if(step0<0){ fprintf(stderr,"resume: no optimiser state beside %s\n",resume); return 1; }
+      fprintf(stderr,"[resume] from %s at step %d\n",resume,step0);
+    }
     long long np=params_count();
     fprintf(stderr,"[%s] params=%lld  B=%d T=%d steps=%d lr=%g\n",archname,np,B,T,steps,lr);
     int *x=malloc(sizeof(int)*B*T),*y=malloc(sizeof(int)*B*T);
     double t0=now_sec(); double best=1e9; float lastloss=0;
     double tf=0,tb=0,to=0,tl=0; g_prof_on = getenv("DISCO_PROF")!=NULL;
     FILE*lg = NULL; { char pb[512]; snprintf(pb,sizeof pb,"%s.trainlog",ckpt); lg=fopen(pb,"w"); }
-    for(int s=1;s<=steps;s++){
+    int slast = stopat? stopat : steps;
+    for(int s=step0+1;s<=slast;s++){
       /* cosine schedule with warmup */
       float f = s<warm ? (float)s/warm
                        : minlr_frac + 0.5f*(1-minlr_frac)*(1+cosf(3.14159265f*(s-warm)/(float)(steps-warm+1)));
@@ -393,6 +413,7 @@ int main(int argc,char**argv){
       if(loss!=loss){ fprintf(stderr,"NaN at step %d\n",s); break; }
     }
     (void)best;
+    if(savestate) ckpt_save_full(ckpt,slast);
     if(g_prof_on){ fprintf(stderr,"[phase] fwd %.2fs  celoss %.2fs  bwd %.2fs  opt %.2fs\n",tf,tl,tb,to); prof_dump("bwd"); }
     if(lg) fclose(lg);
     double ttrain=now_sec()-t0;

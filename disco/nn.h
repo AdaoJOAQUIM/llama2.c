@@ -146,6 +146,8 @@ void opt_init(void);
 void opt_step(float lr, float beta1, float beta2, float eps, float wd, int t, float clip);
 void opt_zero_grad(void);
 void params_invalidate_q(void);
+void opt_state_save(FILE *f,int step);
+int  opt_state_load(FILE *f);
 
 /* ---------------- rng ---------------- */
 extern uint64_t g_rng;
