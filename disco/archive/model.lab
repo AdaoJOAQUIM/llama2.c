@@ -234,4 +234,5 @@ OPEN|val_bpb is improvable by a bigram hash table (ngrammem, +0.075 reproducible
 OPEN|hashffn beats a dense model of identical parameter count that reads 3x more bytes per token (1.6760 vs 1.7102). Unexplained.
 OPEN|Every architecture in this archive is a published technique. Did the search find anything, or only rank prior art?
 PRED|ortho_e8|1.50|1.55|orthostack|mem=1,experts=8,convw=4|2026-08-11T17:02:23
+RESULT|ortho_e8|1337|1.52184|dc90850c4369f4f877fbc14f941b7f48b1e8fea8f2ccd1df8c3b4f5d5221a744
 """
