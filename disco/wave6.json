@@ -1,21 +1,87 @@
-{"wave": 6, "specs": [
- {"id":"w6_hash_pos","arch":"hashffn","args":{"lr":0.012},"knobs":{"experts":4,"route":1},
-  "hypothesis":"CONTROL for the wave-1 hashffn win. Identical architecture, identical parameter count, identical sparsity, identical per-token read cost -- but the route is position mod 4, which carries NO information about the text. If hashffn's 6.4-sigma win survives this, the win came from owning more parameters and reading a slice of them, and the routing function is irrelevant. If it collapses, content-dependent routing is doing the work. Because every expert then sees a statistically identical 1/4 of the tokens, all four should converge to the same function trained on a quarter of the data, which ought to be WORSE than the 247K baseline.",
-  "pred_text":"754,432 params, 990,208 unique bytes/token (identical to hashffn and to baseline). val_bpb in [1.78, 2.00] -- worse than baseline, and far worse than hashffn's 1.6760.",
-  "prediction":{"params":754432,"wbytes":990208,"val_bpb":[1.78,2.00]}},
-
- {"id":"w6_hash_uni","arch":"hashffn","args":{"lr":0.012},"knobs":{"experts":4,"route":2},
-  "hypothesis":"Second control: route on the CURRENT token only, discarding the context. Content-dependent but not context-dependent. Separates 'the route must depend on the text' from 'the route must depend on more than one byte'. Sits between the position control and the bigram router.",
-  "pred_text":"754,432 params, 990,208 unique bytes/token. val_bpb in [1.68, 1.78].",
-  "prediction":{"params":754432,"wbytes":990208,"val_bpb":[1.68,1.78]}},
-
- {"id":"w6_hash_e2","arch":"hashffn","args":{"lr":0.012},"knobs":{"experts":2,"route":0},
-  "hypothesis":"Completes the expert-count curve (2 / 4 / 8) at fixed read cost. If quality improves monotonically with expert count while bytes/token stays pinned at 990,208, the parameter axis and the I/O axis are genuinely decoupled, which is the most useful thing this search can establish.",
-  "pred_text":"416,512 params, 990,208 unique bytes/token. val_bpb in [1.69, 1.76].",
-  "prediction":{"params":416512,"wbytes":990208,"val_bpb":[1.69,1.76]}},
-
- {"id":"w6_dense754","arch":"llama","args":{"lr":0.012,"hidden":704},
-  "hypothesis":"Upper bound for the hashffn family: a DENSE model with exactly hashffn's 754,432 parameters (hidden 704 instead of 176). It must read all of them every token, 3,017,728 bytes. The gap between this and hashffn is the price of sparsity; the gap between this and the baseline is the value of the parameters. Fills the extreme cell (>768K params, >1.6M bytes/token). This is a deliberate width change, allowed here because it is a control for a positive result rather than an exploration move.",
-  "pred_text":"754,432 params, 3,017,728 unique bytes/token. val_bpb in [1.58, 1.70].",
-  "prediction":{"params":754432,"wbytes":3017728,"val_bpb":[1.58,1.70]}}
-]}
+{
+ "wave": 6,
+ "specs": [
+  {
+   "id": "w6_hash_pos",
+   "arch": "hashffn",
+   "args": {
+    "lr": 0.012
+   },
+   "knobs": {
+    "experts": 4,
+    "route": 1
+   },
+   "hypothesis": "CONTROL for the wave-1 hashffn win. Identical architecture, identical parameter count, identical sparsity, identical per-token read cost -- but the route is position mod 4, which carries NO information about the text. If hashffn's 6.4-sigma win survives this, the win came from owning more parameters and reading a slice of them, and the routing function is irrelevant. If it collapses, content-dependent routing is doing the work. Because every expert then sees a statistically identical 1/4 of the tokens, all four should converge to the same function trained on a quarter of the data, which ought to be WORSE than the 247K baseline.",
+   "pred_text": "754,432 params, 990,208 unique bytes/token (identical to hashffn and to baseline). val_bpb in [1.78, 2.00] -- worse than baseline, and far worse than hashffn's 1.6760.",
+   "prediction": {
+    "params": 754432,
+    "wbytes": 990208,
+    "val_bpb": [
+     1.78,
+     2.0
+    ]
+   }
+  },
+  {
+   "id": "w6_hash_uni",
+   "arch": "hashffn",
+   "args": {
+    "lr": 0.012
+   },
+   "knobs": {
+    "experts": 4,
+    "route": 2
+   },
+   "hypothesis": "Second control: route on the CURRENT token only, discarding the context. Content-dependent but not context-dependent. Separates 'the route must depend on the text' from 'the route must depend on more than one byte'. Sits between the position control and the bigram router.",
+   "pred_text": "754,432 params, 990,208 unique bytes/token. val_bpb in [1.68, 1.78].",
+   "prediction": {
+    "params": 754432,
+    "wbytes": 990208,
+    "val_bpb": [
+     1.68,
+     1.78
+    ]
+   }
+  },
+  {
+   "id": "w6_hash_e2",
+   "arch": "hashffn",
+   "args": {
+    "lr": 0.012
+   },
+   "knobs": {
+    "experts": 2,
+    "route": 0
+   },
+   "hypothesis": "Completes the expert-count curve (2 / 4 / 8) at fixed read cost. If quality improves monotonically with expert count while bytes/token stays pinned at 990,208, the parameter axis and the I/O axis are genuinely decoupled, which is the most useful thing this search can establish.",
+   "pred_text": "416,512 params, 990,208 unique bytes/token. val_bpb in [1.69, 1.76].",
+   "prediction": {
+    "params": 416512,
+    "wbytes": 990208,
+    "val_bpb": [
+     1.69,
+     1.76
+    ]
+   }
+  },
+  {
+   "id": "w6_dense754",
+   "arch": "llama",
+   "args": {
+    "lr": 0.012,
+    "hidden": 704,
+    "arena": 2000
+   },
+   "hypothesis": "Upper bound for the hashffn family: a DENSE model with exactly hashffn's 754,432 parameters (hidden 704 instead of 176). It must read all of them every token, 3,017,728 bytes. The gap between this and hashffn is the price of sparsity; the gap between this and the baseline is the value of the parameters. Fills the extreme cell (>768K params, >1.6M bytes/token). This is a deliberate width change, allowed here because it is a control for a positive result rather than an exploration move.",
+   "pred_text": "754,432 params, 3,017,728 unique bytes/token. val_bpb in [1.58, 1.70].",
+   "prediction": {
+    "params": 754432,
+    "wbytes": 3017728,
+    "val_bpb": [
+     1.58,
+     1.7
+    ]
+   }
+  }
+ ]
+}

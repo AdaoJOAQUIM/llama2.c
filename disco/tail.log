@@ -1,0 +1,168 @@
+###### wave8.json 22:08:20
+=== wave 8: 4 variants ===
+[w8_1layer] bpb=2.2544  params=62720  uB/tok=250880  traffic/tok=251136  rss=3832KB  tok/s=71983  macs/tok=79616  consist=0.0e+00
+  params           predicted 62,720     measured 62,720     ok
+  wbytes           predicted 250,880    measured 250,880    ok
+  val_bpb          predicted [2.20, 2.50]  measured 2.2544  -> CONFIRMED
+   archive: improves cell 1,3 (2.2603 -> 2.2544)
+[w8_novalue_nr] bpb=1.9475  params=237312  uB/tok=949248  traffic/tok=949504  rss=5776KB  tok/s=15442  macs/tok=322048  consist=0.0e+00
+  params           predicted 237,312    measured 237,312    ok
+  wbytes           predicted 949,248    measured 949,248    ok
+  val_bpb          predicted [1.85, 2.05]  measured 1.9475  -> CONFIRMED
+   archive: cell 4,6 already held by base_s4 at 1.7505
+[w8_ema_convonly] bpb=1.7032  params=248832  uB/tok=995328  traffic/tok=995584  rss=5244KB  tok/s=38566  macs/tok=246848  consist=6.7e-06
+  params           predicted 248,672    measured 248,832    ok
+  val_bpb          predicted [1.72, 1.90]  measured 1.7032  -> REFUTED (better)
+   archive: improves cell 4,6 (1.7505 -> 1.7032)
+[w8_ema_emaonly] bpb=1.7744  params=247872  uB/tok=991488  traffic/tok=991744  rss=5192KB  tok/s=40198  macs/tok=246848  consist=5.7e-06
+  val_bpb          predicted [1.95, 2.40]  measured 1.7744  -> REFUTED (better)
+   archive: cell 4,6 already held by w8_ema_convonly at 1.7032
+
+wave 8 done in 8.7 min
+
+MAP-Elites: rows = params, cols = weight bytes read / token
+cell value = best val_bpb (bits per byte), lower is better
+
+               <32K        32-64K      64-128K      128-256K     256-512K     512-768K    768K-1.05M   1.05-1.6M      >1.6M    
+          ---------------------------------------------------------------------------------------------------------------------
+     <48K|      .            .            .            .            .            .            .            .            .      
+   48-96K|      .            .            .          2.254          .            .            .            .            .      
+  96-160K|      .            .            .            .            .            .            .            .            .      
+ 160-224K|      .            .            .          1.944          .          2.025          .            .            .      
+ 224-288K|      .            .          2.124        1.769        1.868          .          1.703        1.681          .      
+ 288-384K|      .            .            .            .            .            .            .            .            .      
+ 384-512K|      .            .            .          2.448          .            .          1.686          .            .      
+ 512-768K|      .            .            .            .            .            .          1.676          .          1.710    
+    >768K|      .            .            .            .            .            .          1.637          .            .      
+
+filled 13/81 cells
+###### wave9.json 22:17:00
+=== wave 9: 4 variants ===
+[w9_emaconv_h153] bpb=1.6765  params=247552  uB/tok=990208  traffic/tok=990464  rss=5192KB  tok/s=38278  macs/tok=245248  consist=5.7e-06
+  params           predicted 247,552    measured 247,552    ok
+  val_bpb          predicted [1.69, 1.76]  measured 1.6765  -> REFUTED (better)
+   archive: improves cell 4,6 (1.7032 -> 1.6765)
+[w9_hashffn_s2] bpb=1.6905  params=754432  uB/tok=990208  traffic/tok=990464  rss=9936KB  tok/s=12907  macs/tok=332288  consist=0.0e+00
+
+   archive: cell 7,6 already held by w1_hashffn at 1.6760
+[w9_emaconv_s2] bpb=1.6843  params=269632  uB/tok=1078528  traffic/tok=1078784  rss=5348KB  tok/s=34448  macs/tok=267328  consist=5.7e-06
+
+   archive: cell 4,7 already held by w2_emaconv at 1.6813
+[w9_ngrammem_s2] bpb=1.6961  params=510016  uB/tok=991744  traffic/tok=992000  rss=6928KB  tok/s=14732  macs/tok=332288  consist=0.0e+00
+
+   archive: cell 6,6 already held by w2_ngrammem at 1.6863
+
+wave 9 done in 9.1 min
+
+MAP-Elites: rows = params, cols = weight bytes read / token
+cell value = best val_bpb (bits per byte), lower is better
+
+               <32K        32-64K      64-128K      128-256K     256-512K     512-768K    768K-1.05M   1.05-1.6M      >1.6M    
+          ---------------------------------------------------------------------------------------------------------------------
+     <48K|      .            .            .            .            .            .            .            .            .      
+   48-96K|      .            .            .          2.254          .            .            .            .            .      
+  96-160K|      .            .            .            .            .            .            .            .            .      
+ 160-224K|      .            .            .          1.944          .          2.025          .            .            .      
+ 224-288K|      .            .          2.124        1.769        1.868          .          1.676        1.681          .      
+ 288-384K|      .            .            .            .            .            .            .            .            .      
+ 384-512K|      .            .            .          2.448          .            .          1.686          .            .      
+ 512-768K|      .            .            .            .            .            .          1.676          .          1.710    
+    >768K|      .            .            .            .            .            .          1.637          .            .      
+
+filled 13/81 cells
+###### wave10.json 22:26:05
+=== wave 10: 4 variants ===
+[w10_hashffn_s3] bpb=1.6966  params=754432  uB/tok=990208  traffic/tok=990464  rss=9928KB  tok/s=12999  macs/tok=332288  consist=0.0e+00
+
+   archive: cell 7,6 already held by w1_hashffn at 1.6760
+[w10_emaconv_s3] bpb=1.6669  params=269632  uB/tok=1078528  traffic/tok=1078784  rss=5436KB  tok/s=34966  macs/tok=267328  consist=5.7e-06
+
+   archive: improves cell 4,7 (1.6813 -> 1.6669)
+[w10_ngrammem_s3] bpb=1.7002  params=510016  uB/tok=991744  traffic/tok=992000  rss=7008KB  tok/s=14645  macs/tok=332288  consist=0.0e+00
+
+   archive: cell 6,6 already held by w2_ngrammem at 1.6863
+[w10_emaconv_h153_s2] bpb=1.6771  params=247552  uB/tok=990208  traffic/tok=990464  rss=5124KB  tok/s=35845  macs/tok=245248  consist=5.7e-06
+
+   archive: cell 4,6 already held by w9_emaconv_h153 at 1.6765
+
+wave 10 done in 9.1 min
+
+MAP-Elites: rows = params, cols = weight bytes read / token
+cell value = best val_bpb (bits per byte), lower is better
+
+               <32K        32-64K      64-128K      128-256K     256-512K     512-768K    768K-1.05M   1.05-1.6M      >1.6M    
+          ---------------------------------------------------------------------------------------------------------------------
+     <48K|      .            .            .            .            .            .            .            .            .      
+   48-96K|      .            .            .          2.254          .            .            .            .            .      
+  96-160K|      .            .            .            .            .            .            .            .            .      
+ 160-224K|      .            .            .          1.944          .          2.025          .            .            .      
+ 224-288K|      .            .          2.124        1.769        1.868          .          1.676        1.667          .      
+ 288-384K|      .            .            .            .            .            .            .            .            .      
+ 384-512K|      .            .            .          2.448          .            .          1.686          .            .      
+ 512-768K|      .            .            .            .            .            .          1.676          .          1.710    
+    >768K|      .            .            .            .            .            .          1.637          .            .      
+
+filled 13/81 cells
+###### REMEASURE 22:35:11
+re-measuring 41 variants with the final binary (serial)
+  base_s2              bpb=1.7869 uB/tok=990208    ws16=990208    rss=5900    tok/s=14451   cons=0.0e+00 (0s)
+  base_s3              bpb=1.7632 uB/tok=990208    ws16=990208    rss=5888    tok/s=13646   cons=0.0e+00 (0s)
+  base_s4              bpb=1.7505 uB/tok=990208    ws16=990208    rss=5880    tok/s=14459   cons=0.0e+00 (0s)
+  base_s5              bpb=1.7767 uB/tok=990208    ws16=990208    rss=5832    tok/s=14048   cons=0.0e+00 (0s)
+  w1_sharedloop        bpb=2.2603 uB/tok=255488    ws16=255488    rss=4512    tok/s=16311   cons=0.0e+00 (0s)
+  w1_hashffn           bpb=1.6760 uB/tok=990208    ws16=2891008   rss=9928    tok/s=12294   cons=0.0e+00 (0s)
+  w1_ternffn           bpb=1.9097 uB/tok=356608    ws16=356608    rss=6584    tok/s=14719   cons=0.0e+00 (0s)
+  w1_novalue           bpb=2.1251 uB/tok=949248    ws16=949248    rss=5780    tok/s=15114   cons=0.0e+00 (0s)
+  w2_emaconv           bpb=1.6813 uB/tok=1078528   ws16=1078528   rss=5436    tok/s=31560   cons=5.7e-06 (0s)
+  w2_ngrammem          bpb=1.6863 uB/tok=991744    ws16=995264    rss=6956    tok/s=12713   cons=0.0e+00 (0s)
+  w2_deepgate          bpb=1.8682 uB/tok=455196    ws16=560660    rss=5892    tok/s=18540   cons=0.0e+00 (0s)
+  w2_lowrankffn        bpb=2.0249 uB/tok=739328    ws16=739328    rss=5460    tok/s=15637   cons=0.0e+00 (0s)
+  w3_multitok2         bpb=2.3032 uB/tok=503296    ws16=1006592   rss=5900    tok/s=13712   cons=0.0e+00 (0s)
+  w3_multitok4         bpb=3.1723 uB/tok=259840    ws16=1039360   rss=5968    tok/s=13336   cons=0.0e+00 (0s)
+  w3_hashffn8          bpb=1.6369 uB/tok=990208    ws16=4834048   rss=15236   tok/s=11513   cons=0.0e+00 (0s)
+  w4_q8all             bpb=1.7694 uB/tok=249664    ws16=249664    rss=6848    tok/s=12915   cons=0.0e+00 (0s)
+  w4_q2all             bpb=2.1243 uB/tok=64528     ws16=64528     rss=6868    tok/s=13885   cons=0.0e+00 (0s)
+  w4_kvshare           bpb=1.8364 uB/tok=924672    ws16=924672    rss=5268    tok/s=15741   cons=0.0e+00 (0s)
+  w4_loopexpert        bpb=1.9439 uB/tok=255488    ws16=660992    rss=5220    tok/s=10477   cons=0.0e+00 (0s)
+  w6_hash_pos          bpb=1.9199 uB/tok=990208    ws16=3017728   rss=9936    tok/s=10714   cons=0.0e+00 (0s)
+  w6_hash_uni          bpb=1.7182 uB/tok=990208    ws16=2891008   rss=10000   tok/s=11773   cons=0.0e+00 (0s)
+  w6_hash_e2           bpb=1.7140 uB/tok=990208    ws16=1666048   rss=7284    tok/s=11946   cons=0.0e+00 (0s)
+  w6_dense754          bpb=1.7102 uB/tok=3017728   ws16=3017728   rss=7432    tok/s=5122    cons=0.0e+00 (0s)
+  w7_casc_t20          bpb=2.4480 uB/tok=133099    ws16=840928    rss=6600    tok/s=13981   cons=0.0e+00 (0s)
+  w7_casc_t80          bpb=1.7913 uB/tok=907697    ws16=1026624   rss=6696    tok/s=13178   cons=0.0e+00 (0s)
+  w7_casc_t95          bpb=1.7729 uB/tok=1007516   ws16=1026536   rss=6704    tok/s=13097   cons=0.0e+00 (0s)
+  w7_adapt8_t50        bpb=2.5967 uB/tok=706775    ws16=1104896   rss=6240    tok/s=11100   cons=0.0e+00 (0s)
+  w7_adapt8_t85        bpb=2.4951 uB/tok=997970    ws16=1104896   rss=6232    tok/s=11199   cons=0.0e+00 (0s)
+  w7_adapt4_t60        bpb=2.3125 uB/tok=846575    ws16=1039360   rss=5984    tok/s=11437   cons=0.0e+00 (0s)
+  w8_1layer            bpb=2.2544 uB/tok=250880    ws16=250880    rss=3916    tok/s=73464   cons=0.0e+00 (0s)
+  w8_novalue_nr        bpb=1.9475 uB/tok=949248    ws16=949248    rss=5792    tok/s=15005   cons=0.0e+00 (0s)
+  w8_ema_convonly      bpb=1.7032 uB/tok=995328    ws16=995328    rss=5172    tok/s=39785   cons=6.7e-06 (0s)
+  w8_ema_emaonly       bpb=1.7744 uB/tok=991488    ws16=991488    rss=5168    tok/s=41179   cons=5.7e-06 (0s)
+  w9_emaconv_h153      bpb=1.6765 uB/tok=990208    ws16=990208    rss=5248    tok/s=37546   cons=5.7e-06 (0s)
+  w9_hashffn_s2        bpb=1.6905 uB/tok=990208    ws16=2975488   rss=9972    tok/s=12266   cons=0.0e+00 (0s)
+  w9_emaconv_s2        bpb=1.6843 uB/tok=1078528   ws16=1078528   rss=5276    tok/s=35660   cons=5.7e-06 (0s)
+  w9_ngrammem_s2       bpb=1.6961 uB/tok=991744    ws16=995424    rss=6920    tok/s=14901   cons=0.0e+00 (0s)
+  w10_hashffn_s3       bpb=1.6966 uB/tok=990208    ws16=2933248   rss=9840    tok/s=12360   cons=0.0e+00 (0s)
+  w10_emaconv_s3       bpb=1.6669 uB/tok=1078528   ws16=1078528   rss=5436    tok/s=35335   cons=5.7e-06 (0s)
+  w10_ngrammem_s3      bpb=1.7002 uB/tok=991744    ws16=995392    rss=6976    tok/s=14479   cons=0.0e+00 (0s)
+  w10_emaconv_h153_s2  bpb=1.6771 uB/tok=990208    ws16=990208    rss=5296    tok/s=37641   cons=5.7e-06 (0s)
+
+archive rebuilt from re-measured metrics
+
+MAP-Elites: rows = params, cols = weight bytes read / token
+cell value = best val_bpb (bits per byte), lower is better
+
+               <32K        32-64K      64-128K      128-256K     256-512K     512-768K    768K-1.05M   1.05-1.6M      >1.6M    
+          ---------------------------------------------------------------------------------------------------------------------
+     <48K|      .            .            .            .            .            .            .            .            .      
+   48-96K|      .            .            .          2.254          .            .            .            .            .      
+  96-160K|      .            .            .            .            .            .            .            .            .      
+ 160-224K|      .            .            .          1.944          .          2.025          .            .            .      
+ 224-288K|      .            .          2.124        1.769        1.868        2.597        1.676        1.667          .      
+ 288-384K|      .            .            .            .            .            .            .            .            .      
+ 384-512K|      .            .            .          2.448          .            .          1.686          .            .      
+ 512-768K|      .            .            .            .            .            .          1.676          .          1.710    
+    >768K|      .            .            .            .            .            .          1.637          .            .      
+
+filled 14/81 cells
+###### FINISHED 22:35:14

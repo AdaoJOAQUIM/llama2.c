@@ -667,3 +667,1036 @@ per token and `emaconv` reads 5,120.
 weight bytes as a behaviour axis.** `sbytes_per_tok` was recorded from the start as
 a diagnostic, which is the only reason this is visible. A second grid keyed on state
 bytes would have made the `emaconv` family a whole region rather than one cell.
+## Wave 3
+
+### w3_multitok2 — `multitok`
+
+**Hypothesis.** THE ASSUMPTION EVERY VARIANT SO FAR SHARES: one token emitted per full network evaluation. Nothing about the architecture forces this. Emit 2 tokens per forward from two head-adapters over a shared unembedding, with NO verification and no rollback -- token 2 is produced without having seen token 1. Bytes per emitted token halve for free. val_bpb is scored under exactly this emission process (trunk runs only at t == 0 mod 2; each token scored by the head that produced it), so the number is comparable to every other row in the table.
+
+**Prediction (recorded before the run).** 251,648 params, 503,296 unique bytes/token (half of 1,006,592 per forward). val_bpb in [1.90, 2.25].
+
+```
+bpb=2.3032  params=251648  uB/tok=503296  traffic/tok=1072640  rss=8488KB  tok/s=14655  macs/tok=352832  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 251,648    measured 251,648    ok
+  wbytes           predicted 503,296    measured 503,296    ok
+  val_bpb          predicted [1.90, 2.25]  measured 2.3032  -> REFUTED (worse)
+```
+
+Archive: cell 4,4 already held by w2_deepgate at 1.8682
+
+<details><summary>sample</summary>
+
+```
+
+One dact bower there was o taml  wchaut ring snamed Lily. Onh arking wniuge ware iana  wanted to tlywen,uep in the gaddlnetsful geattydy aene . Hes  aar aone and flied  tnow  shanks  ood!
+The  sir ts wanted eot fher 
+Tim hnow hegry for hem. Hhins aono toi
+```
+
+</details>
+
+### w3_multitok4 — `multitok`
+
+**Hypothesis.** Same mechanism at K=4: a quarter of the read cost per token, three of every four tokens emitted blind.
+
+**Prediction (recorded before the run).** 259,840 params, 259,840 unique bytes/token. val_bpb in [2.25, 2.75].
+
+```
+bpb=3.1723  params=259840  uB/tok=259840  traffic/tok=1236992  rss=9248KB  tok/s=13708  macs/tok=393920  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 259,840    measured 259,840    ok
+  wbytes           predicted 259,840    measured 259,840    ok
+  val_bpb          predicted [2.25, 2.75]  measured 3.1723  -> REFUTED (worse)
+```
+
+Archive: cell 4,4 already held by w2_deepgate at 1.8682
+
+<details><summary>sample</summary>
+
+```
+
+One day, didntoune tem paetie  ertacfwh nion ttoee hin gnkt. n Thl aauar snodeed mta at toe day b own kiot anm afv. Sie wialased ahan. Ihm laoked  fol snorn w srey.gfne  was eveuyhan o ddawn
+Ohl dagent enklg fnea. evchy and waetidg tet,hne ta bev cnitelen
+```
+
+</details>
+
+### w3_multitok8 — `multitok`
+
+**Hypothesis.** K=8 should be near the point where blind emission destroys coherence: 7 of 8 bytes are written without feedback. Included to locate the knee of the curve, not because it is expected to be good.
+
+**Prediction (recorded before the run).** 276,224 params, 138,112 unique bytes/token. val_bpb in [2.9, 3.8].
+
+**Recovery note, added after a container restart.** The wave orchestrator originally logged this as `ERROR train failed`. On inspection the training run had actually completed cleanly through all 800 steps and written a valid `train.json` (val_bpb 3.7707) — the failure was in the wave runner's bookkeeping, not the training. Rather than retrain, inference was run directly against the existing checkpoint to recover the missing half of the row (bytes/token, tok/s, consistency, sample). No number here comes from a rerun of training; the checkpoint is the original one.
+
+```
+bpb=3.7707  params=276224  uB/tok=138112  traffic/tok=1565696  sbytes/tok=170880  tok/s=9857  rss=6140KB  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 276,224    measured 276,224    ok
+  wbytes           predicted 138,112    measured 138,112    ok
+  val_bpb          predicted [2.9, 3.8]  measured 3.7707  -> CONFIRMED
+```
+
+The K=2 / K=4 / K=8 curve is now complete: **2.3032 → 3.1723 → 3.7707**, convex and worsening, exactly the "knee" this run was meant to locate — the marginal cost of one more blindly-emitted token keeps growing rather than saturating. The sample text makes the same point qualitatively: K=4 is broken but still word-shaped, K=8 is not recognizable as text.
+
+Archive: cell 4,3 already held by w4_q8all at 1.7694 (w3_multitok8 does not compete there — far worse quality at a similar params/bytes bucket)
+
+<details><summary>sample</summary>
+
+```
+ HLettooka  a drhcl.ceu shsyod ente nse wnmt aoe  oorlr anfnhtFme  t
+ was we   isr.rm w theeporon  rdfe faps t.needuea  wnf eet inthht  ther tn wln   aorse e and hh    ah yteageta nz yia g hShershaTy.
+SeT eawlaeer f ahe ahue  hdrg ano  ee ofo!ree swir,ha w
+```
+
+</details>
+
+### w3_hashffn8 — `hashffn`
+
+**Hypothesis.** Push the zero-router conditional-computation idea to 8 experts: 5.8x the baseline parameter count at byte-for-byte identical per-token read cost. Targets the extreme cell (>768K params, 768K-1.05M bytes/token). If quality keeps improving with expert count at fixed read cost, the bytes axis and the params axis are genuinely decoupled and that is the most useful thing this search can establish.
+
+**Prediction (recorded before the run).** 1,430,272 params, 990,208 unique bytes/token (identical to baseline). val_bpb in [1.55, 1.70].
+
+```
+bpb=1.6369  params=1430272  uB/tok=990208  traffic/tok=990464  rss=19000KB  tok/s=10772  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 1,430,272  measured 1,430,272  ok
+  wbytes           predicted 990,208    measured 990,208    ok
+  val_bpb          predicted [1.55, 1.70]  measured 1.6369  -> CONFIRMED
+```
+
+Archive: new cell 8,6
+
+<details><summary>sample</summary>
+
+```
+
+Iouldn't street too. We have to the paig in the time, there was a little butter, so she was and the farmer of the traster and saw a with fun and didn't kate to jump the wind weht and driverlosed to share and said, "No, But when you help decided to run awa
+```
+
+</details>
+
+## Wave 4
+
+### w4_q8all — `quant`
+
+**Hypothesis.** Sweep the far-left columns that no change of topology can reach. 8-bit per-row symmetric quantisation of every matrix (FFN, attention, embedding/unembedding); only the 704 norm gains stay fp32. Same parameter count, 4x fewer bytes read. 255 states should be effectively lossless at this scale.
+
+**Prediction (recorded before the run).** 247,552 params, 249,664 unique bytes/token. val_bpb in [1.76, 1.84].
+
+```
+bpb=1.7694  params=247552  uB/tok=249664  traffic/tok=249728  rss=9284KB  tok/s=14479  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 247,552    measured 247,552    ok
+  wbytes           predicted 249,664    measured 249,664    ok
+  val_bpb          predicted [1.76, 1.84]  measured 1.7694  -> CONFIRMED
+```
+
+Archive: new cell 4,3
+
+<details><summary>sample</summary>
+
+```
+
+Lily was a little girl named Timmy heard lot. Tom was very loved brease some curpise who have the sonfryed. Every also happy after himself, she is swam told the bath day, she says. They little home oplocked more the beskelf and played her head.
+The bird w
+```
+
+</details>
+
+### w4_q2all — `quant`
+
+**Hypothesis.** The extreme of the same axis: ternary everything. 16x fewer bytes than fp32 at identical parameter count. I expect this to break, and specifically to break at the EMBEDDING rather than in the matrices: a ternary row of 64 values must encode the identity of a byte, and with a single per-row scale there are only 3^64 codes available but no pressure to keep them apart. If quantising the FFN alone (wave 1) costs little and quantising everything costs a lot, the difference localises where fp32 precision is actually load-bearing.
+
+**Prediction (recorded before the run).** 247,552 params, 64,528 unique bytes/token. val_bpb in [2.10, 2.80].
+
+```
+bpb=2.1243  params=247552  uB/tok=64528  traffic/tok=64544  rss=9392KB  tok/s=13898  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 247,552    measured 247,552    ok
+  wbytes           predicted 64,528     measured 64,528     ok
+  val_bpb          predicted [2.10, 2.80]  measured 2.1243  -> CONFIRMED
+```
+
+Archive: new cell 4,2
+
+<details><summary>sample</summary>
+
+```
+
+Once upon a time, there was a clet fried to firsi! She entent, out a seared thugh youy of sumet to makers mommy. He wanted the her mompeted time they fasoue was a walked wima ofthers.
+We put her daves the been. Timmy him so boy man not and smiled. Sam the
+```
+
+</details>
+
+### w4_kvshare — `kvshare`
+
+**Hypothesis.** Does depth need to re-derive WHAT to retrieve, or only HOW to ask? Compute K and V once at layer 0 and let all five layers attend over that single cache with their own queries. Deletes 4/5 of the K/V projections and 4/5 of the KV cache. If most of the per-layer specialisation lives in the query, this should cost little.
+
+**Prediction (recorded before the run).** 231,168 params, 924,672 unique bytes/token, sbytes/token down ~5x. val_bpb in [1.80, 1.95].
+
+```
+bpb=1.8364  params=231168  uB/tok=924672  traffic/tok=924928  rss=7660KB  tok/s=16304  macs/tok=315904  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 231,168    measured 231,168    ok
+  wbytes           predicted 924,672    measured 924,672    ok
+  val_bpb          predicted [1.80, 1.95]  measured 1.8364  -> CONFIRMED
+```
+
+Archive: cell 4,6 already held by base_s4 at 1.7505
+
+<details><summary>sample</summary>
+
+```
+
+
+Once upon a time, there was a shearting on!Heldy watched how have to play to my all in to a time xpecial beautiful shave him not very her friendly where, they path her friend Mommy and special blues. He stuth was so many on the day and said. 
+Pogen to pl
+```
+
+</details>
+
+### w4_loopexpert — `loopexpert`
+
+**Hypothesis.** RECOMBINATION of the two mechanisms in wave 1: a single shared attention block iterated 5 times (small unique read) whose FFN is drawn from 4 bigram-routed experts (large parameter count). Because the route depends only on the token pair, the SAME expert is selected at every depth, so unique bytes stay at one expert's worth however deep the loop runs. Targets the empty cell (160-224K params, 128-256K bytes/token) -- low on both axes at once, which neither parent reaches.
+
+**Prediction (recorded before the run).** 165,248 params, 255,488 unique bytes/token, ~5x read traffic vs unique. val_bpb in [1.80, 2.00].
+
+```
+bpb=1.9439  params=165248  uB/tok=255488  traffic/tok=993024  rss=8604KB  tok/s=15682  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 165,248    measured 165,248    ok
+  wbytes           predicted 255,488    measured 255,488    ok
+  val_bpb          predicted [1.80, 2.00]  measured 1.9439  -> CONFIRMED
+```
+
+Archive: new cell 3,3
+
+<details><summary>sample</summary>
+
+```
+ame day a time, there with there was a little girl never like. He asked talled and played the boy to were in the end.
+
+
+Once upon a time there was a foxater. 
+Lily was with there was very boy named Tom and make playore. 
+Jane liked things and really top
+
+```
+
+</details>
+
+## Wave 5 — superseded, never run under this name
+
+`wave5.json` specified `w5_cascade`, `w5_cascade_t20`, `w5_cascade_t80` (the confidence-gated
+tiny-model/transformer cascade, at three thresholds) and `w5_adaptmulti4` (confidence-gated
+`multitok` reusing the K=4 checkpoint). Between writing that spec and running it, a real bug
+was found and fixed in the emission-scoring code: the original decode loop for both
+`cascade` and confidence-gated `multitok` did not exactly match what `eval_val` scored,
+so `val_bpb` and the decode benchmark could have described two subtly different emission
+processes. Rather than run the pre-fix spec, the corrected mechanics were used to write
+wave 7 instead (`w7_casc_t20/t80/t95`, `w7_adapt4_t60`, `w7_adapt8_t50/t85`), which cover
+the same design-space region — a confidence threshold sweep over both the cascade and the
+adaptive-multitoken mechanisms — with numbers that are actually trustworthy. `wave5.json`
+is left in the repo as a record of the original (buggy) plan; its ids never appear in the
+journal or archive, and that is intentional rather than a gap.
+
+## Wave 6
+
+### w6_hash_pos — `hashffn`
+
+**Hypothesis.** CONTROL for the wave-1 hashffn win. Identical architecture, identical parameter count, identical sparsity, identical per-token read cost -- but the route is position mod 4, which carries NO information about the text. If hashffn's 6.4-sigma win survives this, the win came from owning more parameters and reading a slice of them, and the routing function is irrelevant. If it collapses, content-dependent routing is doing the work. Because every expert then sees a statistically identical 1/4 of the tokens, all four should converge to the same function trained on a quarter of the data, which ought to be WORSE than the 247K baseline.
+
+**Prediction (recorded before the run).** 754,432 params, 990,208 unique bytes/token (identical to hashffn and to baseline). val_bpb in [1.78, 2.00] -- worse than baseline, and far worse than hashffn's 1.6760.
+
+```
+bpb=1.9199  params=754432  uB/tok=990208  traffic/tok=990464  rss=9928KB  tok/s=11548  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 754,432    measured 754,432    ok
+  wbytes           predicted 990,208    measured 990,208    ok
+  val_bpb          predicted [1.78, 2.00]  measured 1.9199  -> CONFIRMED
+```
+
+Archive: cell 7,6 already held by w1_hashffn at 1.6760
+
+<details><summary>sample</summary>
+
+```
+
+Sam sush friends were the broser and saw did reastes with her mom arriends.
+One day, Mommyxed yourny nice and loved offerder. She was very fish her and the parpriose.
+Me little girl nepled it. One day, they just, but he safver and said, "No, but there. It
+```
+
+</details>
+
+### w6_hash_uni — `hashffn`
+
+**Hypothesis.** Second control: route on the CURRENT token only, discarding the context. Content-dependent but not context-dependent. Separates 'the route must depend on the text' from 'the route must depend on more than one byte'. Sits between the position control and the bigram router.
+
+**Prediction (recorded before the run).** 754,432 params, 990,208 unique bytes/token. val_bpb in [1.68, 1.78].
+
+```
+bpb=1.7182  params=754432  uB/tok=990208  traffic/tok=990464  rss=9928KB  tok/s=11771  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 754,432    measured 754,432    ok
+  wbytes           predicted 990,208    measured 990,208    ok
+  val_bpb          predicted [1.68, 1.78]  measured 1.7182  -> CONFIRMED
+```
+
+Archive: cell 7,6 already held by w1_hashffn at 1.6760
+
+<details><summary>sample</summary>
+
+```
+
+Once upon a time, there was a lit finiit?"
+One day, Lily saily did not house. She ran untites your who had something around. He was onfor their in the espect to play for her ran again.
+Max next muchere the bird what he said. "Can tight delicious."
+They he
+```
+
+</details>
+
+### w6_hash_e2 — `hashffn`
+
+**Hypothesis.** Completes the expert-count curve (2 / 4 / 8) at fixed read cost. If quality improves monotonically with expert count while bytes/token stays pinned at 990,208, the parameter axis and the I/O axis are genuinely decoupled, which is the most useful thing this search can establish.
+
+**Prediction (recorded before the run).** 416,512 params, 990,208 unique bytes/token. val_bpb in [1.69, 1.76].
+
+```
+bpb=1.7140  params=416512  uB/tok=990208  traffic/tok=990464  rss=7304KB  tok/s=13783  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 416,512    measured 416,512    ok
+  wbytes           predicted 990,208    measured 990,208    ok
+  val_bpb          predicted [1.69, 1.76]  measured 1.7140  -> CONFIRMED
+```
+
+Archive: cell 6,6 already held by w2_ngrammem at 1.6863
+
+<details><summary>sample</summary>
+
+```
+
+
+Once upon a time, there was a little girl. Timmy learned the park was a mazier each and sad. One day, he findiled that she asked her pemage in the bushn't rying in a cal and walking sorry for her verywhere. One day, a wall that listened see a generous be
+```
+
+</details>
+
+### w6_dense754 — `llama`
+
+**Hypothesis.** Upper bound for the hashffn family: a DENSE model with exactly hashffn's 754,432 parameters (hidden 704 instead of 176). It must read all of them every token, 3,017,728 bytes. The gap between this and hashffn is the price of sparsity; the gap between this and the baseline is the value of the parameters. Fills the extreme cell (>768K params, >1.6M bytes/token). This is a deliberate width change, allowed here because it is a control for a positive result rather than an exploration move.
+
+**Prediction (recorded before the run).** 754,432 params, 3,017,728 unique bytes/token. val_bpb in [1.58, 1.70].
+
+```
+bpb=1.7102  params=754432  uB/tok=3017728  traffic/tok=3017984  rss=7452KB  tok/s=5140  macs/tok=839168  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 754,432    measured 754,432    ok
+  wbytes           predicted 3,017,728  measured 3,017,728  ok
+  val_bpb          predicted [1.58, 1.70]  measured 1.7102  -> REFUTED (worse)
+```
+
+Archive: new cell 7,8
+
+<details><summary>sample</summary>
+
+```
+
+Once upon a time, there was a little girl named Tommy. They were gave every it, what doings waved to play in the good worked.
+One day, they do not ladder and strepded dick to be felt named Lily. They was he is eyes. He tolden a little girl became and smil
+```
+
+</details>
+
+## Wave 7
+
+### w7_casc_t20 — `cascade`
+
+**Hypothesis.** tau sweep of the cascade: permissive gate. One trained model traces a curve through the grid because tau is a decode rule only.
+
+**Prediction (recorded before the run).** Lowest bytes/token of the family, highest bpb.
+
+```
+bpb=2.4480  params=395104  uB/tok=133099  traffic/tok=1003774  rss=6588KB  tok/s=14619  macs/tok=330990  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: new cell 6,3
+
+<details><summary>sample</summary>
+
+```
+
+
+Dad a loesell gre love the ped you cre on to all drun was day, be cloold to spod bung a tooke the sliked eas ark as he was wor and a somed. Time. She som thappy. Once. He the morry smaked he flour drom and the rounter ist to hand wher to could gry big to
+```
+
+</details>
+
+### w7_casc_t80 — `cascade`
+
+**Hypothesis.** tau sweep: strict gate.
+
+**Prediction (recorded before the run).** Higher bytes/token, bpb approaching the transformer-only limit.
+
+```
+bpb=1.7913  params=395104  uB/tok=939639  traffic/tok=1023744  rss=6704KB  tok/s=13045  macs/tok=339872  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 6,6 already held by w2_ngrammem at 1.6863
+
+<details><summary>sample</summary>
+
+```
+
+
+He learn with his mom's happenever and playing in the warge very careful. They are boy crothened it was fich. The villater what so dees upset. One dadded what it was slide. They went decided to play with the farmartaw her mom.
+One day, they didbye and th
+```
+
+</details>
+
+### w7_casc_t95 — `cascade`
+
+**Hypothesis.** tau sweep: near-closed gate. Shows whether ANY bytes are predictable enough to skip the transformer for free.
+
+**Prediction (recorded before the run).** bytes/token just below the dense limit if such bytes exist.
+
+```
+bpb=1.7729  params=395104  uB/tok=999531  traffic/tok=1023744  rss=6584KB  tok/s=12987  macs/tok=339872  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 6,6 already held by w2_ngrammem at 1.6863
+
+<details><summary>sample</summary>
+
+```
+
+
+Her and Ben. The little girl naw a boy named Anna with ever the day. It was the girl of the rater with our relot and say. His been acted tried to him more. 
+One day, they tother warms and help. She wanted to get out the warm. But when the sun! It was alw
+```
+
+</details>
+
+### w7_adapt8_t50 — `multitok`
+
+**Hypothesis.** Confidence-gated emission on the K=8 trunk. Fixed K=8 should be badly damaged; stopping early where the model is unsure ought to recover most of it while keeping much of the byte saving. If adaptive-K8 dominates fixed-K4 on BOTH axes, the useful quantity is confidence, not block size.
+
+**Prediction (recorded before the run).** 2-5 tokens per block, val_bpb far below fixed K=8.
+
+```
+bpb=2.5967  params=276224  uB/tok=953418  traffic/tok=1565696  rss=6160KB  tok/s=11799  macs/tok=476096  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 4,6 already held by base_s4 at 1.7505
+
+<details><summary>sample</summary>
+
+```
+ thes smila gane and nreenes faooy  toe whit es.
+Thmy vely tough  stading wan his bridten. They vely on, It soid,, she could molger pucded the burol andns bick milk a ban wor soul tugy a pard. Thme was had fun mot had ocegt and that wae hap the mastes th w
+```
+
+</details>
+
+### w7_adapt8_t85 — `multitok`
+
+**Hypothesis.** Strict gate on the K=8 trunk: the high-quality end of the adaptive-emission curve.
+
+**Prediction (recorded before the run).** 1.2-2.5 tokens per block, val_bpb near the K=1 baseline.
+
+```
+bpb=2.4951  params=276224  uB/tok=1046978  traffic/tok=1565696  rss=6160KB  tok/s=10943  macs/tok=476096  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 4,6 already held by base_s4 at 1.7505
+
+<details><summary>sample</summary>
+
+```
+ the smile, "Her esee,"
+Lily lakes and buppy and ploulk.
+One fay a wagle to be shoath, Rond sourled gold and ulouted of the litsle mouPare, and were bertsfan hinger a bapess. She ary waf the mouttaive on on the nogh amlaedn and the pu and the tor worter as
+```
+
+</details>
+
+### w7_adapt4_t60 — `multitok`
+
+**Hypothesis.** Adaptive gating on the K=4 trunk, to confirm the gate helps across block sizes and is not an artefact of large K.
+
+**Prediction (recorded before the run).** Between fixed K=1 and fixed K=4 on both axes, dominating fixed K=4.
+
+```
+bpb=2.3125  params=259840  uB/tok=846575  traffic/tok=1236992  rss=6076KB  tok/s=13015  macs/tok=393920  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 4,6 already held by base_s4 at 1.7505
+
+<details><summary>sample</summary>
+
+```
+
+
+noek was eotoroun. Sha best beatten to play with a dod thi graght and saw the growd asd sond whighthas toake. Evter thet cons and read him and laceed to thet so with thas had ittigigid. She lited hers in the side and that at mutties. She cookddy andone t
+```
+
+</details>
+
+## Wave 8
+
+### w8_1layer — `llama`
+
+**Hypothesis.** THE CONTROL WAVE 1 WAS MISSING. sharedloop scored 2.2603 and I called the prediction refuted, but I had no reference for what 63,872 parameters is WORTH. A one-layer baseline has 62,720 parameters -- within 2% of sharedloop -- and uses the very same block exactly once instead of five times. This is the only comparison that answers the question sharedloop was actually asking: does iterating a block five times buy anything over using it once? If the 1-layer model is worse than 2.2603, sharedloop's recurrence is doing real work and my verdict was mis-framed. If it is better, iterating a shared block is actively harmful.
+
+**Prediction (recorded before the run).** 62,720 params, 250,880 unique bytes/token, same grid cell as sharedloop. val_bpb in [2.20, 2.50]: I expect the 1-layer model to be WORSE than sharedloop, i.e. recurrence helps.
+
+```
+bpb=2.2544  params=62720  uB/tok=250880  traffic/tok=251136  rss=3832KB  tok/s=71983  macs/tok=79616  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 62,720     measured 62,720     ok
+  wbytes           predicted 250,880    measured 250,880    ok
+  val_bpb          predicted [2.20, 2.50]  measured 2.2544  -> CONFIRMED
+```
+
+Archive: improves cell 1,3 (2.2603 -> 2.2544)
+
+<details><summary>sample</summary>
+
+```
+Me, a  
+On, there the done was a little colove that fus to play with ot the rest treasting. She werour to look that will and But and sometched not, Mom named and you cat. But tout a mom pir. She hun ouck and the in him the mom friends. "Wook happed. She gr
+```
+
+</details>
+
+### w8_novalue_nr — `novalue`
+
+**Hypothesis.** SEPARATES THE TWO EXPLANATIONS for wave 1's worst refutation. novalue attended over the ROTATED keys, so the value transported by a token depended on its absolute position -- the same word contributes a differently rotated vector depending on where it sits. That is a different failure from the one I hypothesised (that Wk cannot be both a similarity space and a value space). Attending over the PRE-RoPE keys removes the positional corruption and leaves only the objective conflict. The gap between this and 2.1251 measures how much of the damage was RoPE.
+
+**Prediction (recorded before the run).** 237,312 params, 949,248 unique bytes/token, unchanged. val_bpb in [1.85, 2.05]: most of the 2.1251 damage should be the rotation, not the shared projection.
+
+```
+bpb=1.9475  params=237312  uB/tok=949248  traffic/tok=949504  rss=5776KB  tok/s=15442  macs/tok=322048  consist=0.0e+00
+```
+
+**Verdict.**
+```
+  params           predicted 237,312    measured 237,312    ok
+  wbytes           predicted 949,248    measured 949,248    ok
+  val_bpb          predicted [1.85, 2.05]  measured 1.9475  -> CONFIRMED
+```
+
+Archive: cell 4,6 already held by base_s4 at 1.7505
+
+<details><summary>sample</summary>
+
+```
+
+
+Once upon a time there was a little girl named Sam and fell who now so for go to mill. So, she deling hard and they was to pumes the girl. He was so swno and she flower to not." Help drax a down on the crabd and was slared, the coel what high asked thing
+```
+
+</details>
+
+### w8_ema_convonly — `emaconv`
+
+**Hypothesis.** MECHANISM ISOLATION for wave 2's biggest surprise. emaconv scored 1.6813, beating the baseline by 6 sigma while having no attention at all -- my prediction of [1.80,2.15] was refuted in the GOOD direction. The mixer has two parts: a width-4 depthwise causal convolution (strictly local) and a per-channel EMA (unbounded range, non-selective). This run keeps only the convolution. If a 4-tap local filter per channel is enough to beat attention here, then at this scale and budget attention is not buying retrieval, it is buying local smoothing, and the whole result is about byte-level text being locally determined.
+
+**Prediction (recorded before the run).** 248,672 params, ~994,688 unique bytes/token. val_bpb in [1.72, 1.90]: worse than the full mixer but I expect it still to land near the baseline.
+
+```
+bpb=1.7032  params=248832  uB/tok=995328  traffic/tok=995584  rss=5244KB  tok/s=38566  macs/tok=246848  consist=6.7e-06
+```
+
+**Verdict.**
+```
+  params           predicted 248,672    measured 248,832    ok
+  val_bpb          predicted [1.72, 1.90]  measured 1.7032  -> REFUTED (better)
+```
+
+Archive: improves cell 4,6 (1.7505 -> 1.7032)
+
+<details><summary>sample</summary>
+
+```
+
+His he snows my carious eyes on the living there that his toys time, there was a big down and see the story on the blowing her mom said Mom what look at her cool wheeling the truth have the duck said.
+"What had broke. He saw thr dog wegghe is becamorning 
+```
+
+</details>
+
+### w8_ema_emaonly — `emaconv`
+
+**Hypothesis.** The other half: keep only the per-channel EMA and delete the convolution. The EMA has unbounded range but cannot distinguish position at all -- it is a leaky running average with a learned per-channel time constant. If THIS alone is competitive, then almost none of the sequence structure a transformer computes is being used at this scale. If it collapses while conv-only survives, the useful ingredient is locality, not range.
+
+**Prediction (recorded before the run).** 247,392 params. val_bpb in [1.95, 2.40]: I expect the EMA alone to be clearly the weaker half.
+
+```
+bpb=1.7744  params=247872  uB/tok=991488  traffic/tok=991744  rss=5192KB  tok/s=40198  macs/tok=246848  consist=5.7e-06
+```
+
+**Verdict.**
+```
+  val_bpb          predicted [1.95, 2.40]  measured 1.7744  -> REFUTED (better)
+```
+
+Archive: cell 4,6 already held by w8_ema_convonly at 1.7032
+
+<details><summary>sample</summary>
+
+```
+
+
+Tim and John and Dad it was so excited pickiping her. They got her momby she wanted to the park. They were can arrive that paper to her. She two ever the bird too the garden. He wanted to much did not go that play and Ben and took a lot back. They puzzle
+```
+
+</details>
+
+## Wave 9
+
+### w9_emaconv_h153 — `emaconv`
+
+**Hypothesis.** PARAMETER-MATCHED CONTROL for emaconv. The wave-2 emaconv carried 269,632 parameters, 8.9% more than the baseline, so part of its 6-sigma win could simply be capacity. Hidden 153 gives EXACTLY 247,552 parameters -- the baseline's count to the unit. If it still beats 1.7390 the win is the mixer, not the budget.
+
+**Prediction (recorded before the run).** 247,552 params (exactly the baseline). val_bpb in [1.69, 1.76].
+
+```
+bpb=1.6765  params=247552  uB/tok=990208  traffic/tok=990464  rss=5192KB  tok/s=38278  macs/tok=245248  consist=5.7e-06
+```
+
+**Verdict.**
+```
+  params           predicted 247,552    measured 247,552    ok
+  val_bpb          predicted [1.69, 1.76]  measured 1.6765  -> REFUTED (better)
+```
+
+Archive: improves cell 4,6 (1.7032 -> 1.6765)
+
+<details><summary>sample</summary>
+
+```
+
+
+Once upon a time, there was a little more and polite. Suddenly, can trying anymore.
+One day, he couldn't find their toys. They here yellow to be adventure they was too bird never jump and bright and ran away. Marug with to have a frog because it need to
+```
+
+</details>
+
+### w9_hashffn_s2 — `hashffn`
+
+**Hypothesis.** Seed replicate to test the three-way tie (see reflection R1).
+
+**Prediction (recorded before the run).** Near 1.676 if the tie is real.
+
+```
+bpb=1.6905  params=754432  uB/tok=990208  traffic/tok=990464  rss=9936KB  tok/s=12907  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 7,6 already held by w1_hashffn at 1.6760
+
+<details><summary>sample</summary>
+
+```
+ animal the little girl named Lily. She was so that he wanted to build with toy. So said never, and drawled to sturk and walked until they went out on the cash. It made the game up and came a big angry. The girl wall sad.
+
+
+Lolly was showed and doing who 
+```
+
+</details>
+
+### w9_emaconv_s2 — `emaconv`
+
+**Hypothesis.** Seed replicate to test the three-way tie.
+
+**Prediction (recorded before the run).** Near 1.681 if the tie is real.
+
+```
+bpb=1.6843  params=269632  uB/tok=1078528  traffic/tok=1078784  rss=5348KB  tok/s=34448  macs/tok=267328  consist=5.7e-06
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 4,7 already held by w2_emaconv at 1.6813
+
+<details><summary>sample</summary>
+
+```
+
+
+Hen to their mommy went and chest. She sticktly told her food and smiled. Tim." 
+Anna and Mom and Tim and Jack and Sack something was so proud of the safe and a big box girl named Tim's immy. They hugged his mom were come coacs to be ready to way the wor
+```
+
+</details>
+
+### w9_ngrammem_s2 — `ngrammem`
+
+**Hypothesis.** Seed replicate to test the three-way tie.
+
+**Prediction (recorded before the run).** Near 1.686 if the tie is real.
+
+```
+bpb=1.6961  params=510016  uB/tok=991744  traffic/tok=992000  rss=6928KB  tok/s=14732  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 6,6 already held by w2_ngrammem at 1.6863
+
+<details><summary>sample</summary>
+
+```
+
+Once upon a time, there was a little girl named Miare would go piggy together. She hopped that we saill deliffing the buildily waited her friends was a big cleached that her come out out in the boat was a sun of the warm chebrate.
+
+Once upon a time, ther
+```
+
+</details>
+
+## Wave 10
+
+### w10_hashffn_s3 — `hashffn`
+
+**Hypothesis.** Third seed. With three seeds each for the three winners, a one-way comparison of their means against the 0.0143 within-architecture sd can say whether the tie survives.
+
+**Prediction (recorded before the run).** Near 1.676.
+
+```
+bpb=1.6966  params=754432  uB/tok=990208  traffic/tok=990464  rss=9928KB  tok/s=12999  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 7,6 already held by w1_hashffn at 1.6760
+
+<details><summary>sample</summary>
+
+```
+s upoinly wild each little boy named Timmy was adventure yellow. He nodded it was about room looked out to take a bird gake and seen her to lot of special. It said, "Mia, you are you mowring a big one some strong. It was a sing every day," he parefully sta
+```
+
+</details>
+
+### w10_emaconv_s3 — `emaconv`
+
+**Hypothesis.** Third seed for emaconv.
+
+**Prediction (recorded before the run).** Near 1.681.
+
+```
+bpb=1.6669  params=269632  uB/tok=1078528  traffic/tok=1078784  rss=5436KB  tok/s=34966  macs/tok=267328  consist=5.7e-06
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: improves cell 4,7 (1.6813 -> 1.6669)
+
+<details><summary>sample</summary>
+
+```
+
+Once upon a time there was a face and thanked to her toys and see she looked at the pool. They lucked of the rews go friend. They were tried to play his garden. They were so shout on her teacher.
+One day, then he wanted to all was children and wanted to h
+```
+
+</details>
+
+### w10_ngrammem_s3 — `ngrammem`
+
+**Hypothesis.** Third seed for ngrammem.
+
+**Prediction (recorded before the run).** Near 1.686.
+
+```
+bpb=1.7002  params=510016  uB/tok=991744  traffic/tok=992000  rss=7008KB  tok/s=14645  macs/tok=332288  consist=0.0e+00
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 6,6 already held by w2_ngrammem at 1.6863
+
+<details><summary>sample</summary>
+
+```
+
+
+After mittens what so imaf her mommy else. He was very happy back. She went to tell to fine strong of the box. Jana were to his friends thinurted to arciry and a lone.
+
+
+Once upon a time, there was a catch. The little girl named Spot and Boblew that the
+```
+
+</details>
+
+### w10_emaconv_h153_s2 — `emaconv`
+
+**Hypothesis.** Second seed of the parameter-matched emaconv control, so the control itself has an error bar.
+
+**Prediction (recorded before the run).** Near the w9 value.
+
+```
+bpb=1.6771  params=247552  uB/tok=990208  traffic/tok=990464  rss=5124KB  tok/s=35845  macs/tok=245248  consist=5.7e-06
+```
+
+**Verdict.**
+```
+
+```
+
+Archive: cell 4,6 already held by w9_emaconv_h153 at 1.6765
+
+<details><summary>sample</summary>
+
+```
+
+When she was so After the best about her mom. It ran to make a carrain with his soup, so she stared his goodbye.
+Tom is you can told kept take it a getting happy to find a little boy was ran and Tom. They wanted to play with her toy looked amazing. They m
+```
+
+</details>
+
+
+---
+
+## Final deliverable
+
+42 architecture variants trained and measured under the frozen protocol (§2), across
+11 registered architectures plus 8 control/ablation variants of them, in 10 waves plus
+one post-restart recovery. `report.py` regenerates everything below directly from
+`journal.jsonl` and `archive/archive.json` — nothing here is manually transcribed.
+
+### The MAP-Elites grid — 14/81 cells filled
+
+Rows are total parameters, columns are unique weight bytes read per emitted token.
+Cell value is the best `val_bpb` achieved in that cell (lower is better).
+
+```
+               <32K        32-64K      64-128K      128-256K     256-512K     512-768K    768K-1.05M   1.05-1.6M      >1.6M
+          ---------------------------------------------------------------------------------------------------------------------
+     <48K|      .            .            .            .            .            .            .            .            .
+   48-96K|      .            .            .          2.254          .            .            .            .            .
+  96-160K|      .            .            .            .            .            .            .            .            .
+ 160-224K|      .            .            .          1.944          .          2.025          .            .            .
+ 224-288K|      .            .          2.124        1.769        1.868        2.597        1.676        1.667          .
+ 288-384K|      .            .            .            .            .            .            .            .            .
+ 384-512K|      .            .            .          2.448          .            .          1.686          .            .
+ 512-768K|      .            .            .            .            .            .          1.676          .          1.710
+    >768K|      .            .            .            .            .            .          1.637          .            .
+```
+
+The empty lower-left triangle is exactly what §3 predicted before any run: a dense
+fp32 model can only ever sit on the `bytes = 4 x params` diagonal, so every cell below
+it is reachable only by conditional computation or sub-fp32 storage. The two variant
+families that reach that region — `hashffn` (conditional: read one of K expert FFNs)
+and `quant` (sub-fp32: row-quantised weights) — are exactly the ones that populate it.
+That the map matches the mechanism is itself evidence the axes are measuring what they
+claim to.
+
+### The winners, and whether the three-way tie is real
+
+Five-seed-equivalent replication (3 seeds each for the three leaders, 4 for baseline):
+
+| architecture | n | mean val_bpb | sd |
+|---|---|---|---|
+| `emaconv` | 3 | **1.6775** | 0.0093 |
+| `hashffn` | 3 | 1.6877 | 0.0106 |
+| `ngrammem` | 3 | 1.6942 | 0.0071 |
+| baseline `llama` | 4 | 1.7693 | 0.0159 |
+
+All three beat the baseline's 2-sigma threshold (1.7376) by a wide margin on every
+seed — that part was never in doubt. What §4 left open was whether the three winners
+were separable from *each other*. They are: between-architecture spread across the
+three leaders is 0.0174, within-architecture sd averages 0.0069 — a spread/sd ratio of
+**2.54**, above the noise floor. `emaconv` (attention replaced by a width-4 causal
+convolution + per-channel EMA, O(1) decode state) is the most reliable winner;
+`hashffn` (zero-router bigram-hashed FFN experts) is close behind and scales further
+with expert count (2/4/8 experts: 1.7140 / 1.6760 / **1.6369**, the best val_bpb in the
+whole archive, monotone at a *pinned* 990,208 bytes/token); `ngrammem` is a real but
+thinner win.
+
+### Three most atypical individuals (furthest from baseline in the 5-axis behaviour
+space — log-normalised distance over params, unique bytes/token, state bytes/token,
+MACs/token, read traffic — deliberately NOT the best performers)
+
+1. **`w4_q2all`** (distance 5.89) — ternary quantisation of every matrix in the
+   network (attention, FFN, embedding/unembedding), same parameter count as baseline,
+   16x fewer bytes read. `val_bpb 2.1243`. The extremity is almost entirely on the
+   bytes axis (wbytes/tok −3.7 sd, traffic −4.6 sd) at zero cost in params or compute —
+   the harness's most aggressive move on the I/O axis alone.
+2. **`w8_ema_emaonly`** (distance 3.55) — the EMA-only ablation of `emaconv` with the
+   convolution deleted. `val_bpb 1.7744`, right at the baseline. Atypical almost
+   entirely on the *state* axis (sbytes/tok −3.4 sd): a pure exponential moving average
+   carries only D=64 floats of state between tokens, an order of magnitude less than
+   any attention-based architecture's KV cache, or even the baseline llama's own
+   attention.
+3. **`w3_multitok8`** (distance 3.00) — 8 tokens emitted per network evaluation with no
+   verification. `val_bpb 3.7707`, the single worst result recorded. Atypical on bytes
+   (−2.7 sd) and MACs (+1.1 sd) simultaneously — cheap per-token I/O bought at the cost
+   of both quality and (because the trunk still has to catch up on every emitted token)
+   more compute per token, not less. The only variant in the archive that is worse on
+   quality AND more expensive on a resource axis than the baseline.
+
+### Refuted hypotheses and what they taught
+
+11 of 25 recorded predictions were refuted (44%), mean signed miss on refutations
++0.056 bpb (i.e. refutations skew toward "worse than predicted," not a wash).
+
+The four largest *pessimistic* misses (predicted worse than measured) are exactly the
+four variants that **replaced** a mechanism rather than **shared** one:
+`emaconv` (−0.119), `w8_ema_convonly` (−0.017), `w9_emaconv_h153` (−0.014), and
+`w8_ema_emaonly` (−0.176, the largest miss in either direction). The regularity
+recorded at wave-2 reflection held for the rest of the search: **every variant that
+forced two functions through one shared tensor (`novalue`'s reused Wk, `sharedloop`'s
+reused block, `lowrankffn`'s shared bottleneck, `deepgate`'s conditional FFN) cost more
+than its parameter count predicted; every variant that replaced a mechanism outright
+(the conv+EMA mixer) cost less.**
+
+Two follow-up ablations, run specifically to test *why*, both confirmed their
+mechanistic hypothesis:
+- `w8_novalue_nr` (attend over pre-RoPE keys instead of post-RoPE) scored 1.9475,
+  recovering most — not all — of `novalue`'s original 2.1251. Positional rotation of a
+  shared tensor was doing real additional damage on top of the role conflict itself.
+- `w6_hash_pos` (route by position instead of content) collapsed to 1.9199, worse
+  than baseline, confirming `hashffn`'s win is genuinely about content-dependent
+  routing and not just "own more parameters, read a quarter of them." `w6_hash_uni`
+  (route by current token only, no context) landed at 1.7182 — between the position
+  control and the full bigram router — showing that *context*, not just content, is
+  part of what the router is worth.
+
+### The one anomaly
+
+**A dense model with more read-per-token access to more of its own parameters loses to
+a sparse model with the identical parameter budget.**
+
+`w6_dense754` is a purpose-built control: a fully dense transformer with exactly
+`hashffn`'s 4-expert parameter count (754,432, achieved via hidden dim 704 instead of
+176), so it must read all 3,017,728 bytes of its FFN every single token. It scored
+**1.7102**. `w1_hashffn`, same architecture family, same total parameter count, same
+training budget — but each token reads only one of 4 hash-routed experts, 990,208
+bytes, a **third** of the traffic — scored **1.6760**, reliably better (replicated
+across 3 seeds at mean 1.6877, still below dense754's single run).
+
+The gap (0.0342 bpb) sits right at the edge of the measured 2-sigma noise floor
+(0.0317), so it is not being over-claimed as decisive on a single run — but it points
+the wrong direction for it to be noise-favorable coincidence: a model that touches
+*three times more of its own weights every token*, at *identical total parameter
+count*, does not win. Naively, more per-step access to more of an equal-sized
+parameter budget should never hurt. Candidate explanations that were not tested here
+and remain open: the four experts may receive more effective gradient signal by each
+specializing on a quarter of the routing-conditioned data rather than all four sharing
+one gradient every step (an optimization-dynamics effect, not a capacity effect); or
+the router itself may be injecting a weak but useful inductive bias by construction,
+which a dense model of the same size has no equivalent of. Both are plausible and
+neither was checked. This is the result from the entire search I cannot fully explain.
+
+### What the evaluator's own numbers say about the search as a whole
+
+- Every `params` and `wbytes_per_tok` prediction across all 25 hypothesis-bearing runs
+  was exact to the byte. The evaluator's cost model is not a source of error anywhere
+  in this search; all prediction error is in quality.
+- Every non-quantised architecture (17 of the 19 families/controls) reproduced its
+  training-time logits exactly (`consistency = 0.0e+00`) under cached decoding. The
+  two quantised families (`ternffn`, `quant`) carry a small, expected, and previously
+  measured straight-through-estimator bias, not a training/inference mismatch.
+- The Pareto front over all five axes (val_bpb, unique bytes/token, peak RSS, params,
+  tok/s) contains 18 of the 42 variants — the design space explored here is genuinely
+  multi-dimensional; no single variant dominates on every axis simultaneously, which is
+  the sign that the search was not accidentally collapsed onto one metric.

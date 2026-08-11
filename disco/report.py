@@ -100,5 +100,74 @@ def main():
             print("      " + "  ".join("%s %+.1f sd" % (a.replace("_per_tok", "/tok").replace("_", ""), z)
                                         for a, z in parts))
 
+def verdict_ledger(R):
+    """Refuted hypotheses, with the signed size of the miss."""
+    rows = []
+    for line in open(lab.JOURNAL_JL):
+        d = json.loads(line)
+        if d.get("kind") != "run": continue
+        p = (d.get("prediction") or {}).get("val_bpb")
+        m = d.get("m") or {}
+        if not p or "val_bpb" not in m: continue
+        lo, hi, got = p[0], p[1], m["val_bpb"]
+        if lo <= got <= hi: st, miss = "confirmed", 0.0
+        elif got > hi:      st, miss = "REFUTED worse", got - hi
+        else:               st, miss = "REFUTED better", got - lo
+        rows.append((d["id"], d["arch"], lo, hi, got, st, miss))
+    return rows
+
+def tie_test(R):
+    """Are the leaders' true means actually equal, or is the tie a small-sample
+       accident?  Compares between-architecture spread to within-architecture sd."""
+    import collections, re
+    fam = collections.defaultdict(list)
+    for r in R.values():
+        base = re.sub(r"_s\d+$", "", r["id"])
+        base = re.sub(r"^w\d+_", "", base)
+        fam[(r["arch"], base)].append(r["val_bpb"])
+    groups = {k: v for k, v in fam.items() if len(v) >= 2}
+    if not groups: return None
+    out = []
+    for (arch, base), v in sorted(groups.items(), key=lambda kv: statistics.mean(kv[1])):
+        out.append((arch, base, len(v), statistics.mean(v),
+                    statistics.stdev(v) if len(v) > 1 else 0.0, sorted(v)))
+    return out
+
+_orig_main = main
+def main():
+    _orig_main()
+    R = runs()
+    print()
+    print("=" * 100)
+    print("HYPOTHESIS LEDGER  (prediction recorded before the run; verdict after)")
+    print("=" * 100)
+    led = verdict_ledger(R)
+    print("%-18s %-11s %-16s %9s  %-15s %7s" % ("id","arch","predicted","measured","verdict","miss"))
+    print("-" * 84)
+    for vid, arch, lo, hi, got, st, miss in sorted(led, key=lambda t: -abs(t[6])):
+        print("%-18s %-11s [%.2f, %.2f]     %9.4f  %-15s %+7.3f"
+              % (vid, arch, lo, hi, got, st, miss))
+    ref = [t for t in led if t[5].startswith("REFUTED")]
+    print("\n  %d/%d predictions refuted; mean signed miss on refutations %+.3f bpb"
+          % (len(ref), len(led), (sum(t[6] for t in ref)/len(ref)) if ref else 0))
+
+    tt = tie_test(R)
+    if tt:
+        print()
+        print("=" * 100)
+        print("REPLICATED ARCHITECTURES  (is the three-way tie real?)")
+        print("=" * 100)
+        for arch, base, n, mu, sd, v in tt:
+            print("  %-16s n=%d  mean %.4f  sd %.4f   %s"
+                  % (base, n, mu, sd, ", ".join("%.4f" % x for x in v)))
+        lead = [t for t in tt if t[3] < 1.72]
+        if len(lead) >= 2:
+            spread = max(t[3] for t in lead) - min(t[3] for t in lead)
+            within = statistics.mean([t[4] for t in lead if t[4] > 0] or [0.0143])
+            print("\n  leaders: between-architecture spread %.4f, within-architecture sd %.4f"
+                  % (spread, within))
+            print("  -> spread/sd = %.2f  (%s)" % (spread / within if within else 0,
+                  "indistinguishable" if spread < 2 * within else "separable"))
+
 if __name__ == "__main__":
     main()
