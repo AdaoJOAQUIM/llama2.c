@@ -2096,3 +2096,89 @@ And none of the three bricks is novel. `emaconv` ≈ MEGA, `hashffn` ≈ Hash La
 `ngrammem` ≈ product-key memory. The contribution here is not the bricks but the
 **measurement that says which ones compose** — which is the same conclusion this
 project keeps arriving at from every direction.
+
+---
+
+## Wave 12: DR1 — representing a checkpoint by the process that generates it
+
+Asked for a format achieving 200x compression of this work. The honest starting
+point is that 200x lossless compression of a trained checkpoint is not available by
+quantisation: this archive already measures that route, and `w4_q2all` (ternary
+everywhere) reaches **16x** on weight bytes at a cost of **+0.355 bpb**. Information
+theory does not bend for a better encoder.
+
+There is a different route, and it is legitimate provided it is verified rather than
+asserted: a checkpoint here is a **deterministic function** of
+
+    (C source, corpus, architecture, hyper-parameters, seed, thread count)
+
+so it need not be stored at all. Store the arguments; recompute on demand.
+
+### The prerequisite, measured before building anything
+
+| condition | result |
+|---|---|
+| same config, same thread count, run twice | **bit-identical** checkpoints |
+| same config, different thread count | **different** checkpoints |
+
+The thread-count sensitivity is real and traceable: the linear backward accumulates
+into per-thread tiles whose count equals the thread count, so the summation order —
+and therefore fp32 rounding — changes with it. **`threads` is part of the recipe, not
+an execution detail.** Had this not been checked first, every recipe would have been
+silently unreproducible on a machine with a different core count.
+
+### The format
+
+One line, 173 bytes mean:
+
+```
+DR1|orthostack|64,5,8,4,176,257,1|convw:4,experts:4,mem:0|800,16,256,2|0.012,0.1,100,1337|40da6999…|1d02fe9d…|ba2f1fcf…
+     arch      dim,L,H,KV,hid,V,tie  knobs                steps,bs,seq,threads  lr,wd,warmup,seed  corpus16  src16  ckpt-sha256
+```
+
+`corpus16` and `src16` do not reconstruct those inputs — they exist only to refuse a
+replay against the wrong ones. The full checkpoint SHA-256 is what makes the format
+falsifiable.
+
+### Verification, which is the whole point
+
+```
+replaying w11_ortho_mem1 ...
+  expected 1a6bc0ed975f93796ffaa2e8d161b413277b254089a20f065701c3d490c87b16
+  got      1a6bc0ed975f93796ffaa2e8d161b413277b254089a20f065701c3d490c87b16
+  -> BIT-EXACT REPRODUCTION
+```
+
+**173 bytes regenerate 4,155,904 bytes**, hash for hash, in ~4.5 minutes of CPU.
+
+### The two ratios
+
+41 checkpoints, 70,734,732 bytes of weights, represented by a 7,108-byte recipe book.
+
+| ratio | value | what it assumes |
+|---|---|---|
+| **referential** | **9,951x** | corpus and sources already present — the re-run / reproduce-an-experiment case |
+| **self-contained** | **1.84x** | shipping recipes + corpus (38.4 MB) + C source (131 KB) to a recipient who has nothing |
+
+Quoting only the first would be dishonest. This is **not compression in the Shannon
+sense**: no information was removed, it was moved out of storage and into computation
+plus external dependencies. Claiming a file has been "compressed into a URL" is true
+only for someone who already has the network.
+
+The interesting property is that the self-contained ratio improves **linearly with
+checkpoint count**, because corpus and source amortise across all of them. Measured
+break-even is **22 checkpoints**; this archive holds 41. A party storing thousands of
+variants of one model family tends asymptotically toward the referential ratio.
+
+### What this actually is
+
+Not a compression algorithm. A statement that **the artifact was never the model** —
+the model is the process, and the weights are a cache of it. 200x and beyond is
+reachable, but only by changing what "the model" refers to, and only if the claim is
+backed by a hash rather than a promise.
+
+Two things this does not survive: any nondeterminism in training (a single reduction
+order change breaks it, as the thread-count experiment shows), and loss of the corpus
+(the recipe references data it does not contain). Both are properties worth stating
+plainly, because a format like this is exactly the kind of thing that looks
+impressive until someone tries to replay it on different hardware.
