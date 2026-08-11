@@ -1816,3 +1816,121 @@ of how much or how reliably a slot has been written. That is a real, scoped,
 falsifiable next step — and, honestly, the fact that the first straightforward
 implementation failed its own acceptance criterion is a more useful data point than
 a demo that looked good on the one number that was checked.
+
+---
+
+## Addendum 2: measurement bug #6 retracts addendum 1's headline, and the store is made revocable
+
+Addendum 1 ended by naming the next experiment: replace the fixed mixing weight with
+one that scales with how much evidence a slot actually holds. That experiment was
+run. It produced two things: a **retraction of addendum 1's main claim**, and the
+first working demonstration of the property the whole architectural argument rests
+on.
+
+### What was added
+
+`mem.c`/`mem.h` rewritten:
+
+- **Count-dependent mixing.** `lambda_eff = lambda_max * n / (n + kappa)`, with `n`
+  the count mass already in the slot. A slot written once contributes almost nothing;
+  a well-supported slot contributes nearly `lambda_max`. `kappa == 0` reproduces
+  addendum 1's fixed-lambda behaviour exactly, so both regimes live in one binary
+  and are directly comparable. **Verified**: at `kappa=0` every number reproduces
+  addendum 1 to 4 decimals.
+- **Write log + revocation.** Every write records `(slot, target, episode)`.
+  `cache_revoke(episode)` walks the log in reverse and decrements. Counters widened
+  to 32-bit so the saturating-halve safety valve never fires at experiment scale,
+  which is what keeps revocation exactly invertible; if it ever did fire a `halved`
+  flag is reported and the run would be marked not-exact.
+- **Store accounting** (`cache_stats`): total count mass and occupied slots.
+
+### Measurement bug #6 — and it retracted a positive result
+
+Addendum 1 reported forward transfer of **+0.0264 bpb** at lambda=0.3, computed as
+`pass1_bpb - pass2_bpb`. That formula is wrong, and the error is not subtle:
+**pass1 builds the store while it is being measured.** Its average therefore includes
+early positions where the store was empty *and the mixing penalty was already being
+paid*. `pass1 - pass2` measures "how much of the stream has elapsed", not "how much
+the store learned".
+
+The correct reference is the frozen core alone on the *same* adaptation stream, which
+was never measured. Added as `adapt_before` — and it lands at **1.5887 bpb**, far
+below the 1.6964 val figure (the two regions simply differ in difficulty, which is
+precisely why a matched reference is mandatory).
+
+Recomputing addendum 1's operating point against the correct reference:
+
+| lambda=0.3 | addendum 1 (wrong ref) | corrected |
+|---|---|---|
+| forward transfer | **+0.0264** | **−0.1492** |
+
+**Addendum 1's headline finding — "forward transfer is real at every lambda tested"
+— is retracted. It was an artifact of the reference, not a property of the store.**
+At lambda=0.3 the store makes the adaptation stream substantially *worse*, not better.
+This is the sixth measurement bug found in this project and the only one that
+manufactured a positive result rather than distorting a negative one.
+
+### The corrected picture
+
+Sweeping both knobs against the correct reference (transfer positive = good,
+interference positive = bad):
+
+| lambda | kappa | transfer | interference |
+|---|---|---|---|
+| 0.30 | 0 | −0.1492 | +0.1948 |
+| 0.30 | 50 | −0.0550 | +0.0804 |
+| 0.30 | 200 | −0.0185 | +0.0344 |
+| 0.30 | 500 | −0.0043 | +0.0148 |
+| 0.15 | 500 | +0.0039 | +0.0029 |
+| **0.05** | **200** | **+0.0056** | **+0.0004** |
+| 0.05 | 0 | +0.0106 | +0.0107 |
+| 0.60 | 2000 | −0.0032 | +0.0107 |
+
+Two readings, both worth stating:
+
+1. **Along the kappa axis at fixed lambda=0.3, both columns march toward zero
+   together.** That is not the store getting smarter — it is `lambda_eff → 0`, the
+   store switching itself off. Confidence weighting alone does not rescue a mixing
+   weight that is too high; it just mutes it.
+2. **There is nonetheless a genuine working regime at low lambda.** At
+   `lambda=0.05, kappa=200`, confirmed on 4x more validation data (24,576 tokens):
+   transfer **+0.0056**, interference **+0.0004** — the store helps on new material
+   and leaves the original validation set essentially untouched. This is the first
+   configuration in either addendum where the design's own acceptance bar ("write
+   without hurting") is actually met.
+
+**But the honest size of that win is 0.0056 bpb**, which is roughly a third of the
+0.0143 bpb seed-noise floor established in §4 for the main study. These particular
+measurements are deterministic (frozen core, deterministic store, fixed windows), so
+there is no run-to-run variance to speak of — but the effect is small enough that it
+should be read as "a real mechanism operating at the edge of what this setup can
+resolve", not as a result worth building on yet. A prediction recorded before the
+sweep — that confidence weighting would help only marginally because the damage comes
+from *well*-populated slots — was also **refuted**: kappa reduced interference 5.7x
+(0.1948 → 0.0344 at lambda=0.3), far more than predicted.
+
+### What did work, unambiguously: revocability
+
+Every run above reports:
+
+```
+REVOKE episode1: 27229 records reverted, residual mass=0, halved=0
+after revoke     bpb=1.6407   revocability_error=0.000e+00  EXACT
+```
+
+27,229 writes un-written; store mass returns to exactly 0; bits-per-byte on the
+validation set returns to the pre-write value with **error 0.000e+00**, at every
+lambda and kappa tested. This is the same class of check as the `consistency == 0.0`
+guarantee on the decode path: an invariant that is measured rather than asserted.
+
+That matters more than the transfer number. The argument for separating the write
+path from the read path was never "a cache improves perplexity" — it was that
+learning has to be **localised, attributable and revocable** before an operations
+team will run it, and that this is an architectural property no amount of scaling
+gives you for free. That property is now demonstrated end to end at small scale:
+one write touches one counter, every write carries the episode that caused it, and
+an episode can be rolled back to a bit-identical state.
+
+The useful thing an evaluator can say here is that the deployment property is solid
+and the learning benefit is not yet. That is the opposite ordering from what the
+usual demo shows, and it is the more honest one.
