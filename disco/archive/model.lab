@@ -235,4 +235,6 @@ OPEN|hashffn beats a dense model of identical parameter count that reads 3x more
 OPEN|Every architecture in this archive is a published technique. Did the search find anything, or only rank prior art?
 PRED|ortho_e8|1.50|1.55|orthostack|mem=1,experts=8,convw=4|2026-08-11T17:02:23
 RESULT|ortho_e8|1337|1.52184|dc90850c4369f4f877fbc14f941b7f48b1e8fea8f2ccd1df8c3b4f5d5221a744
+RESULT|ortho_e8|2|1.52365|9a4ab4d5a748207ad9e73f2ada700ed4aa112ad6233fda700f9f20660fb60f2f
+VERDICT|ortho_e8|WIN|0.24656|mean 1.5227 vs baseline 1.7693, margin +0.2466, threshold 0.0318 (2sd); prediction [1.50,1.55] held
 """

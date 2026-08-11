@@ -2267,3 +2267,37 @@ committee*. It does not make the underlying metric any better — `val_bpb` rema
 gameable by a lookup table, and LAB/1 will happily certify a bigram table as a WIN,
 because the rule it enforces is honesty about measurement, not wisdom about what to
 measure. Those are different problems, and only the first one is solved here.
+
+### Wave 13b: the first claim LAB/1 certified on its own
+
+`ortho_e8` — orthostack with 8 experts instead of 4 — was chosen because the answer
+was genuinely unknown: `hashffn` gained 0.039 going 4→8 standalone, but the stack had
+already captured ~90% of its components' additive gains, so the marginal expert could
+plausibly have been saturated.
+
+The full loop, driven by the file:
+
+```
+$ ./model.lab preregister ortho_e8 1.50 1.55 orthostack mem=1 experts=8 convw=4
+pre-registered ortho_e8 in [1.50,1.55]
+$ ./model.lab run ortho_e8 1337 2
+    val_bpb 1.5218
+    val_bpb 1.5236
+  VERDICT: WIN  (mean 1.5227 vs baseline 1.7693, margin +0.2466,
+                 threshold 0.0318 (2sd); prediction [1.50,1.55] held)
+```
+
+**1.5227** (2 seeds, spread 0.0018) — the best result in the archive, past the
+previous best `orthostack mem=1` at 1.5454. The marginal expert is **not** saturated:
+4→8 buys another 0.023 inside the stack, against 0.039 standalone, so roughly 59% of
+the standalone gain survives on top of three already-stacked mechanisms.
+
+Two things worth separating. The result is ordinary — a fourth incremental gain from a
+known technique. What is not ordinary is that **no human decided it was a win**: the
+prediction was timestamped before the run, the seeds were fixed by the file's own
+minimum, and the WIN was computed against a noise floor the file had measured
+earlier. The verdict line in `model.lab` was written by `model.lab`.
+
+Calibration updated automatically and moved in the honest direction: **17/28 (61%)**.
+A forecaster landing 61% of pre-registered intervals is neither well calibrated nor
+useless, and the file will keep reporting it whether or not that flatters the author.
