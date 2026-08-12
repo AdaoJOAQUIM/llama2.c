@@ -16,7 +16,15 @@
 #
 # Requires a rebuild for fmode=2, so this must not start before batch one ends.
 cd "$(dirname "$0")" || exit 1
-for id in seed_r15_emb seed_r15_rand seed_r200_emb seed_r200_struct seed_r1000_struct; do
+# The two extra mask draws test a separate question raised by seed_r200_f9:
+# changing WHICH coordinates are trainable moved the score by 1.19 bpb, fourteen
+# times the spread from changing the training seed at a fixed mask.  If the draw
+# matters that much, the "indices are free" trick is exactly what caps the
+# format -- and an encode-time search over fseed is a legitimate exploit, since
+# the winning fseed costs 4 bytes.  Four draws are enough to say how wide the
+# distribution is and whether its tail could plausibly reach the n-gram bar.
+for id in seed_r15_emb seed_r15_rand seed_r200_emb seed_r200_struct seed_r1000_struct \
+          seed_r200_f11 seed_r200_f13; do
   echo "=== $id ==="
   ./archive/model.lab run "$id" 1337 2>&1
 done
