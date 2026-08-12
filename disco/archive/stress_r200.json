@@ -1,0 +1,83 @@
+{
+ "label": "r200",
+ "arch": "llama",
+ "frozen_frac": 0.00480707,
+ "ckpt": "/home/user/llama2.c/disco/runs/lab_seed_r200_s1337.bin",
+ "lossless": {
+  "max_abs_diff": 0.0,
+  "n_differing": 0,
+  "ntot": 247552,
+  "dense_bytes": 990404,
+  "seed_bytes": 4952,
+  "ratio": 200.001,
+  "lossless": true
+ },
+ "runtime": {
+  "arch": "llama",
+  "params": 247552,
+  "stored_bytes": 990208,
+  "wbytes_per_tok": 990208,
+  "wtraffic_per_tok": 990464,
+  "working_set_16tok": 990208,
+  "sbytes_per_tok": 170880,
+  "macs_per_tok": 332288,
+  "tok_per_sec": 13202.85,
+  "peak_rss_kb": 6144,
+  "consistency": 0.0,
+  "gen": 256,
+  "kout": 1,
+  "frac_fast_decode": 0.0,
+  "load_sec": 0.0055,
+  "artifact_bytes": 4952
+ },
+ "ood": {
+  "ood_id": 6.809,
+  "ood_rot13": 7.61977,
+  "ood_case": 10.48013,
+  "ood_shuf": 6.81393,
+  "ood_synth": 7.19882
+ },
+ "val_bpb": 6.8095,
+ "bypos": [
+  6.98273,
+  6.84724,
+  6.80953,
+  6.82412,
+  6.80432,
+  6.79667,
+  6.78048,
+  6.77981,
+  6.77297,
+  6.81115,
+  6.77013,
+  6.82241,
+  6.79521,
+  6.80275,
+  6.79785,
+  6.75463
+ ],
+ "horizon": {
+  "chars": 2048,
+  "distinct4": 0.010268948655256724,
+  "distinct_chars": 10,
+  "longest_period_repeat": 922
+ },
+ "faults": {
+  "payload_bits": 38080,
+  "flip16": {
+   "n": 8,
+   "n_finite": 6,
+   "median": 6.82035,
+   "worst": 10.25738,
+   "best": 6.81785
+  },
+  "rate_1e4_bits": 3,
+  "rate1e4": {
+   "n": 8,
+   "n_finite": 7,
+   "median": 6.81753,
+   "worst": 6.82294,
+   "best": 6.81745
+  }
+ }
+}

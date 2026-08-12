@@ -2301,3 +2301,306 @@ earlier. The verdict line in `model.lab` was written by `model.lab`.
 Calibration updated automatically and moved in the honest direction: **17/28 (61%)**.
 A forecaster landing 61% of pre-registered intervals is neither well calibrated nor
 useless, and the file will keep reporting it whether or not that flatters the author.
+
+---
+
+## Wave 14 -- the SEED format: is 200x compression of this archive reachable, and does it mean anything?
+
+### Why this wave exists
+
+A conversation elsewhere claimed a format compressing language models by
+1000-3000x with O(1) inference. That claim is not testable at the scale it was
+made at, but it IS testable here: this archive's llama baseline is 247,552
+parameters in a 990,404-byte checkpoint, and 200x of that is 4,952 bytes. If a
+mechanism cannot survive 200x on a quarter-million parameters, it will not
+survive 1000x on a trillion.
+
+The mechanism tested is the only one that reaches those ratios without storing
+indices: **regenerate every weight from the training seed, and store only the
+values of a small subset of coordinates chosen by that same seed.** Indices are
+therefore free. This is the strongest honest version of "the model is mostly
+its initialisation".
+
+### The format
+
+`.seed` = 192-byte self-describing header (magic, seed, fseed, frac, ntot, K,
+arch name, cfg string) + K fp32 values. Reconstruction re-runs the
+architecture's `build()` with the recorded seed -- exactly what the training run
+did -- then overwrites the K masked coordinates. `disco infer --loadseed` never
+opens the dense checkpoint.
+
+Two properties were verified before any quality number was taken:
+
+- **lossless**: `disco seedcheck` rebuilds and diffs coordinate by coordinate
+  against the dense checkpoint. `max_abs_diff = 0.000000e+00`, `n_differing = 0`
+  out of 247,552.
+- **end-to-end identical**: `eval` from the dense checkpoint and `eval` from the
+  `.seed` file alone return the same bpb to all printed digits.
+
+Without both, a quoted ratio would describe an artifact that is not the measured
+model.
+
+### A regression that had to be settled first
+
+Adding the frozen mask meant touching `opt_step`. The first version guarded the
+existing loops with `if(mask[j])`. Mathematically inert when the mask is off --
+and it changed the answer: an archived checkpoint no longer reproduced
+bit-for-bit, because the branch defeated the vectorisation that `-O3
+-ffast-math` had been applying, moving the floating-point summation order.
+
+Fixing it meant duplicating the dense loops textually rather than guarding them.
+After that:
+
+| binary | SHA-256 of orthostack/1337 |
+| --- | --- |
+| HEAD, source as committed | `847b4dce...` |
+| this wave's binary | `847b4dce...` -- identical |
+| recorded in `model.lab` / archive | `dc90850c...` |
+
+So the mask is provably inert on the dense path. But the third line is a
+separate, older finding: **the archive no longer reproduces from the committed
+source.** `model.lab`'s replay guard had been refusing challenges for exactly
+this reason and was right to. Re-running orthostack from HEAD gives val_bpb
+1.5255 against the recorded 1.5218 -- a gap of 0.0037, well inside the noise
+floor (sd 0.0159), so the numeric claim survives while bit-exact replay does
+not. That distinction is now recorded rather than papered over.
+
+### What a compressed model has to beat
+
+A ratio quoted against nothing is not a result. Two reference sets were computed
+on **exactly the tokens `eval_val` scores** (same deterministic offsets, same
+batch layout):
+
+Zero-capacity ceilings (`ceiling.py`):
+
+| model | bpb |
+| --- | --- |
+| uniform over 257 symbols | 8.0056 |
+| unigram fitted on train | 4.4018 |
+| bigram fitted on train | 3.3110 |
+| trigram fitted on train | 2.4907 |
+
+Byte-matched n-gram baselines (`bytematch.py`) -- the best truncated n-gram
+model that FITS in each budget, with 16-bit log-prob quantisation actually
+applied rather than assumed:
+
+| budget | ratio | best n-gram bpb |
+| --- | --- | --- |
+| 988 B | 1002x | 3.4983 |
+| 4,952 B | 200x | 2.6761 |
+| 9,904 B | 100x | 2.5134 |
+| 49,520 B | 20x | 2.4899 |
+| 99,040 B and above | <=10x | 2.4905 (trigram exhausted) |
+
+This is the bar. At 200x the artifact must score below 2.6761, or the
+"compressed model" carries less usable structure than a table of 887 byte
+triples of the same size.
+
+### The curve
+
+Every point trained under the archive's protocol (800 steps, bs 16, seq 256,
+lr 0.012, threads 2), pre-registered in `model.lab` before measuring, and
+compared against the best n-gram model that fits the SAME byte budget.
+
+| ratio | bytes | K trainable | SEED bpb | n-gram, same bytes |
+| ---: | ---: | ---: | ---: | ---: |
+| 2.0x | 495,200 | 123,752 | **1.7484** | 2.4905 |
+| 4.0x | 247,600 | 61,852 | 1.8591 | 2.4905 |
+| 10.0x | 99,040 | 24,712 | 2.2155 | 2.4905 |
+| 15.01x | 65,984 | 16,448 | 2.4954 | ~2.4899 |
+| 20.0x | 49,520 | 12,332 | 2.9315 | 2.4899 |
+| 100x | 9,904 | 2,428 | 6.2867 | 2.5134 |
+| 200x | 4,952 | 1,190 | 6.7661 | 2.6761 |
+| 1002x | 988 | 199 | 7.5902 | 3.4983 |
+
+Dense anchor, this binary: 1.76066 / 1.78685, mean 1.7738.
+
+Two things fall out immediately. The cliff is between 5% and 1% trainable, not
+gradual. And **the dense checkpoint is not on the frontier**: freezing half its
+coordinates at their initialisation gives a file half the size and a score
+0.025 better -- inside the noise, so no win is claimed, but the absence of cost
+is clean.
+
+### The fairness controls, which were the point
+
+A negative result bought by handicapping the thing under test is worth nothing.
+All of these were pre-registered before any of them ran. At an identical 200x
+budget of 4,952 bytes:
+
+| variant | bpb |
+| --- | ---: |
+| `f9`, lucky random mask draw | 5.6216 |
+| `struct`, normalisation gains first | 5.7677 |
+| `lr20`, step size x17 | 6.7157 |
+| `lr5`, step size x4 | 6.7201 |
+| `fseed=7`, reference draw | 6.7661 |
+| `emb`, readout first | 7.8878 |
+
+A 2.27 bpb spread between the best and worst way of spending the identical
+budget -- and the bar at that budget is 2.6761. Nothing rescues 200x.
+
+Raising the step size buys 0.09 bpb for 4x and 0.09 for 17x, which settles the
+optimisation question: the limit is capacity, not the schedule.
+
+### What was refuted, and what replaced it
+
+The explanation written down mid-wave -- that the binding constraint is the
+readout, since 257 output symbols need 257x64 = 16,448 numbers before the
+logits stop being a random projection -- is **wrong, and backwards**. At an
+identical 15.01x:
+
+| allocation of the same 16,448 values | bpb |
+| --- | ---: |
+| spread at random over every tensor | 2.4954 |
+| spent filling the tied readout exactly | 4.1713 |
+
+Concentrating is 1.68 bpb worse than spreading, and the same inversion holds at
+200x (6.7661 spread against 7.8878 concentrated). Stated at its sharpest:
+`seed_r200_emb` trains 1,190 coordinates and scores 7.8878, while `seed_r1000`
+trains 199 spread at random and scores 7.5902. **Six times more trainable
+parameters, concentrated, do worse than six times fewer, spread.**
+
+What replaced it survives a threshold test rather than merely fitting the data.
+The model has 704 rmsnorm gains, two vectors per layer across five layers plus
+the final one, so filling them touches every depth with one scalar per channel:
+
+| ratio | K | gains covered | vs the random mask |
+| --- | ---: | --- | ---: |
+| 200x | 1,190 | 704/704, every depth | **+1.0 bpb** |
+| 1002x | 199 | 199/704, first layers only | -0.12 bpb |
+
+Above K = 704 the strategy wins clearly; below it, it reaches only the first
+few registered tensors, becomes a concentration again, and loses. So: **some
+adaptation has to reach every depth, and the normalisation gains are the
+cheapest way to buy that.** This is not a random-feature regime -- a fully
+random trunk produces features no trained readout recovers.
+
+### The mask draw, and the loophole it opens
+
+Four seed-derived masks at 200x: 5.6216, 6.2533, 6.8095, 7.0872. Mean 6.4429,
+sd 0.648, against sd 0.061 for the training seed at a fixed mask. The choice of
+coordinates weighs about ten times the training noise.
+
+That opens a legitimate exploit: search `fseed` at encode time and store the
+winner, which costs four bytes. **Four samples cannot close it.** The 95%
+interval on that sd runs from 0.37 to 2.42, and at the top of that range twenty
+draws would suffice. No Gaussian tail is extrapolated from n=4 here.
+
+The argument that does hold needs no tail assumption: going from 16,448 to
+1,190 trainable coordinates currently costs +3.95 bpb, and clearing the bar
+would require that cost to be +0.18 -- a factor of 22 from mask choice alone.
+The deliberately designed allocation does not even beat the lucky random draw,
+which is not what a distribution with a far-reaching good tail looks like.
+
+### The dynamic battery, and the finding that matters most
+
+| label | ratio | lossless | load s | RSS MB | tok/s | unique weight B/token |
+| --- | ---: | --- | ---: | ---: | ---: | ---: |
+| dense | 1.0x | true | 0.005 | 5.8 | 13094 | 990,208 |
+| r2 | 2.0x | true | 0.009 | 6.0 | 12600 | 990,208 |
+| r10 | 10.0x | true | 0.006 | 6.1 | 13027 | 990,208 |
+| r200 | 200.0x | true | 0.005 | 6.0 | 13203 | 990,208 |
+
+**Unique weight bytes touched per token is identical at every ratio.** So is
+peak RSS, so is throughput, so is load time. A 200x smaller file is 1x in
+memory, 1x in bandwidth and 1x in speed, because reconstruction materialises
+the same dense array. Any claim that compression of this kind buys inference
+speed is refuted here by direct measurement, independent of quality.
+
+Free generation, 2048 tokens:
+
+| label | distinct-4 | longest repeat | distinct chars |
+| --- | ---: | ---: | ---: |
+| dense | 0.761 | 8 | 39 |
+| r2 | 0.861 | 14 | 42 |
+| r10 | **0.002** | **2044** | **4** |
+| r200 | 0.010 | 922 | 10 |
+
+`r10` was the format's ONLY win over its byte-matched baseline (2.2155 against
+2.4905). It emits `An` and then the byte 0x9E, 2,044 times.
+
+That is the whole case for dynamic testing, and it is an indictment of the
+evaluator this lab is built on. `val_bpb` -- teacher-forced, one position at a
+time -- certified as the single success case a model that produces four
+distinct characters. The per-position curve did not catch it either: r10 reads
+2.48 then flat 2.17-2.22, the same shape as dense, just shifted. Only free
+running caught it. This is the second time in this project that the headline
+metric was gamed by something that is not a language model; the first was
+`ngrammem`, a bigram table.
+
+Out of distribution, five corpora built from one segment so the transformation
+is isolated by the `ood_id` control:
+
+| label | val | id | rot13 | case | shuf | synth |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| dense | 1.7607 | 1.7575 | 8.1801 | 13.3047 | 2.6252 | 8.0368 |
+| r2 | 1.7484 | 1.7402 | 7.8692 | 12.9133 | 2.5828 | 7.7948 |
+| r10 | 2.2155 | 2.2082 | 6.9950 | 10.8702 | 2.5944 | 7.1389 |
+| r200 | 6.8095 | 6.8090 | 7.6198 | 10.4801 | 6.8139 | 7.1988 |
+
+Two things here were not expected. The **dense** model scores 13.3047 on
+case-flipped text against 8.0056 for uniform over 257 symbols: predicting worse
+than knowing nothing is active miscalibration, not ignorance. And the broken
+artifacts are MORE robust -- r200 beats dense on rot13 and on case -- purely
+because being uninformative outperforms being confidently wrong. r200's val,
+ood_id and shuf agree to three decimals (6.8095 / 6.8090 / 6.8139), which is
+the signature of a model that has collapsed to a fixed marginal and does not
+read its input at all.
+
+Fault injection in the stored payload:
+
+| label | payload bits | 16 flips: finite / median | BER 1e-4: bits, finite / median |
+| --- | ---: | --- | --- |
+| dense | 7,923,168 | 5/8, 1.7565 | 792, 0/8, none |
+| r2 | 3,960,064 | 6/8, 1.7455 | 396, 0/8, none |
+| r10 | 790,784 | 4/8, 2.2094 | 79, 1/8, 2.2282 |
+| r200 | 38,080 | 6/8, 6.8204 | 3, 7/8, 6.8175 |
+
+At a fixed count of flipped bits, the compressed artifacts are no more robust --
+r10 goes non-finite in 4 trials of 8 where dense survives 5. At a fixed channel
+error rate they win easily, but only because they expose fewer bits: per stored
+bit, fragility rises roughly with the ratio, while total exposure falls faster.
+One flipped fp32 exponent is enough to produce NaN in any of them.
+
+### Calibration
+
+Eighteen pre-registered intervals, four inside: **22%**, against 61% for the
+preceding 28. The failure is systematic and one-directional: every miss at a
+ratio of 20x or beyond is optimistic, most of them by several bpb. Even
+`seed_r200_f13`, whose interval was written AFTER seeing two draws at that
+ratio, landed 0.087 outside it.
+
+The honest reading is that I had no working model of how fast quality falls off
+with trainable fraction, and the intervals were anchored to what I wanted the
+mechanism to be worth rather than to anything measured.
+
+### Verdict
+
+The mechanism is **dominated everywhere**, which is a stronger negative than
+"expensive at high ratios":
+
+| ratio | quantisation, already in this archive | seed + sparse |
+| --- | --- | --- |
+| ~4x | `w4_q8all` int8, **1.7694** | 1.8591 |
+| ~15x | `w4_q2all` per-row ternary, **2.1243** | 2.4954 |
+
+Per-row ternary quantisation with a straight-through estimator dates to Li et
+al. 2016; BitNet b1.58 (2024) carried it to LLM scale. It beats this format at
+matched compression, and it does not degenerate in free generation.
+
+And the answer to the question that started the wave -- is 1000x possible? --
+depends entirely on what is assumed present, which is the clause the claim
+being tested never states:
+
+- **Exact and lossless: yes, 6,267x, already here.** A 158-byte DR1 line
+  reconstructs the 990,208-byte checkpoint bit-for-bit, sha `3c8cb3b7...`,
+  val_bpb 1.78685 -- and that sha was reproduced by the current binary during
+  this wave. It costs the 38,366,828-byte corpus, the source, and 550 s of CPU.
+  It is a pointer plus a deterministic recomputation, not compression.
+- **Self-contained at 1000x: no.** 988 bytes gets 7.5902 by this mechanism
+  against 8.0056 for uniform, and the best measured at that budget by any
+  method is 3.4983.
+
+A compression ratio without a stated quality target and a stated set of
+assumed-present artifacts is not a measurement. It is a choice of how much to
+discard.
