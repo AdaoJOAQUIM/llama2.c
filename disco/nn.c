@@ -650,15 +650,91 @@ int opt_state_load(FILE*f){
 }
 void opt_init(void){ for(int i=0;i<g_nparams;i++){ g_slots[i].m=(float*)calloc(g_params[i]->n,sizeof(float));
                                                     g_slots[i].v=(float*)calloc(g_params[i]->n,sizeof(float)); } }
+
+/* ---------------- frozen mask ---------------- */
+static unsigned char *g_mask[MAXPARAM];
+static long long g_ktrain=0; static int g_maskon=0;
+int frozen_active(void){ return g_maskon; }
+long long frozen_trainable(void){ return g_ktrain; }
+void frozen_build(float frac,uint32_t fseed,int fmode){
+  if(frac>=1.0f){ g_maskon=0; return; }
+  long long ntot=params_count();
+  long long K=(long long)(frac*(double)ntot+0.5);
+  if(K<1) K=1;
+  for(int i=0;i<g_nparams;i++) g_mask[i]=(unsigned char*)calloc(g_params[i]->n,1);
+  long long need=K, left=ntot;
+  /* fmode 1 spends the budget on the 1-D gain vectors first.  "Small" is
+     defined structurally (ndim==1), not by a hand-picked list of names. */
+  if(fmode==1){
+    for(int i=0;i<g_nparams && need>0;i++){
+      if(g_params[i]->ndim!=1) continue;
+      for(int j=0;j<g_params[i]->n && need>0;j++){ g_mask[i][j]=1; need--; left--; }
+    }
+  }
+  /* uniform WITHOUT replacement over whatever is left: coordinate i is selected
+     with probability (needed remaining)/(coordinates remaining).  Uses its OWN
+     prng stream so the batch-order stream g_rng is untouched and a frozen run
+     differs from a dense run only by the freezing itself. */
+  uint64_t s=(uint64_t)fseed*6364136223846793005ULL+1442695040888963407ULL;
+  for(int i=0;i<g_nparams;i++){
+    for(int j=0;j<g_params[i]->n;j++){
+      if(g_mask[i][j]) continue;
+      s^=s>>12; s^=s<<25; s^=s>>27;
+      double u=(double)((s*0x2545F4914F6CDD1DULL)>>11)/9007199254740992.0;
+      if(left>0 && u*(double)left < (double)need){ g_mask[i][j]=1; need--; }
+      left--;
+    }
+  }
+  g_ktrain=K-need; g_maskon=1;
+}
+void frozen_gather(float *dst){
+  long long k=0;
+  for(int i=0;i<g_nparams;i++) for(int j=0;j<g_params[i]->n;j++)
+    if(g_mask[i][j]) dst[k++]=g_params[i]->d[j];
+}
+void frozen_apply(const float *src){
+  long long k=0;
+  for(int i=0;i<g_nparams;i++) for(int j=0;j<g_params[i]->n;j++)
+    if(g_mask[i][j]) g_params[i]->d[j]=src[k++];
+  params_invalidate_q();
+}
 void params_invalidate_q(void){ for(int i=0;i<g_nparams;i++) g_params[i]->qvalid=0; }
 void opt_zero_grad(void){ for(int i=0;i<g_nparams;i++) memset(g_params[i]->g,0,(size_t)g_params[i]->n*sizeof(float)); }
+/* The dense path below is duplicated rather than guarded by a per-element test.
+   That is deliberate and was forced by a measured failure: adding `if(mask[j])`
+   inside the original loops kept them mathematically identical but changed how
+   -O3 -ffast-math vectorised them, so the floating-point summation order moved
+   and an archived checkpoint no longer reproduced bit-for-bit.  Keeping the
+   unmasked code textually untouched restores exact reproducibility of every
+   claim already recorded in model.lab. */
 void opt_step(float lr,float b1,float b2,float eps,float wd,int t,float clip){
-  double sq=0; for(int i=0;i<g_nparams;i++){ Tensor*p=g_params[i]; for(int j=0;j<p->n;j++) sq+=(double)p->g[j]*p->g[j]; }
+  double sq=0;
+  if(!g_maskon){
+    for(int i=0;i<g_nparams;i++){ Tensor*p=g_params[i]; for(int j=0;j<p->n;j++) sq+=(double)p->g[j]*p->g[j]; }
+  } else {
+    for(int i=0;i<g_nparams;i++){ Tensor*p=g_params[i]; const unsigned char*mk=g_mask[i];
+      for(int j=0;j<p->n;j++) if(mk[j]) sq+=(double)p->g[j]*p->g[j]; }
+  }
   float gn=(float)sqrt(sq), sc=1.0f; if(clip>0 && gn>clip) sc=clip/(gn+1e-6f);
   float c1=1.0f-powf(b1,(float)t), c2=1.0f-powf(b2,(float)t);
+  if(!g_maskon){
+    for(int i=0;i<g_nparams;i++){
+      Tensor*p=g_params[i]; float*m=g_slots[i].m,*v=g_slots[i].v;
+      for(int j=0;j<p->n;j++){
+        float g=p->g[j]*sc;
+        m[j]=b1*m[j]+(1-b1)*g; v[j]=b2*v[j]+(1-b2)*g*g;
+        float mh=m[j]/c1, vh=v[j]/c2;
+        p->d[j] -= lr*(mh/(sqrtf(vh)+eps) + wd*p->d[j]);
+      }
+      p->qvalid=0;
+    }
+    return;
+  }
   for(int i=0;i<g_nparams;i++){
     Tensor*p=g_params[i]; float*m=g_slots[i].m,*v=g_slots[i].v;
+    const unsigned char*mk=g_mask[i];
     for(int j=0;j<p->n;j++){
+      if(!mk[j]) continue;          /* stays bit-exactly at its initial value */
       float g=p->g[j]*sc;
       m[j]=b1*m[j]+(1-b1)*g; v[j]=b2*v[j]+(1-b2)*g*g;
       float mh=m[j]/c1, vh=v[j]/c2;

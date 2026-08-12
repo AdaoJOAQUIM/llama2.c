@@ -1,0 +1,11 @@
+{
+ "n_scored": 98304,
+ "uniform_bpb": 8.005624549193879,
+ "order0_bpb": 4.4018047964609055,
+ "order1_bpb": 3.310976596628042,
+ "order2_bpb": 2.4906632072406225,
+ "distinct_bigrams": 1694,
+ "distinct_trigrams": 11998,
+ "bigram_table_bytes": 10164,
+ "trigram_table_bytes": 83986
+}

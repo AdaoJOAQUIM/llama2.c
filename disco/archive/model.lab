@@ -237,4 +237,18 @@ PRED|ortho_e8|1.50|1.55|orthostack|mem=1,experts=8,convw=4|2026-08-11T17:02:23
 RESULT|ortho_e8|1337|1.52184|dc90850c4369f4f877fbc14f941b7f48b1e8fea8f2ccd1df8c3b4f5d5221a744
 RESULT|ortho_e8|2|1.52365|9a4ab4d5a748207ad9e73f2ada700ed4aa112ad6233fda700f9f20660fb60f2f
 VERDICT|ortho_e8|WIN|0.24656|mean 1.5227 vs baseline 1.7693, margin +0.2466, threshold 0.0318 (2sd); prediction [1.50,1.55] held
+PRED|seed_r2|1.76|1.92|llama|frozen=0.499903,fseed=7|2026-08-12T12:58:54
+PRED|seed_r4|1.80|2.05|llama|frozen=0.249855,fseed=7|2026-08-12T12:58:54
+PRED|seed_r10|1.92|2.25|llama|frozen=0.0998255,fseed=7|2026-08-12T12:58:54
+PRED|seed_r20|2.00|2.45|llama|frozen=0.0498158,fseed=7|2026-08-12T12:58:54
+PRED|seed_r100|2.40|2.95|llama|frozen=0.00980806,fseed=7|2026-08-12T12:58:54
+PRED|seed_r200|2.60|3.20|llama|frozen=0.00480707,fseed=7|2026-08-12T12:58:54
+PRED|seed_r1000|2.95|3.60|llama|frozen=0.000803873,fseed=7|2026-08-12T12:58:54
+PRED|seed_r200_f9|2.60|3.20|llama|frozen=0.00480707,fseed=9|2026-08-12T13:03:09
+PRED|seed_r200_lr5|2.50|3.15|llama|frozen=0.00480707,fseed=7,lrx=0.05|2026-08-12T13:03:09
+PRED|seed_r200_lr20|2.45|3.15|llama|frozen=0.00480707,fseed=7,lrx=0.2|2026-08-12T13:03:09
+PRED|seed_r100_lr5|2.30|2.90|llama|frozen=0.00980806,fseed=7,lrx=0.05|2026-08-12T13:03:09
+PRED|seed_r200_struct|2.35|3.00|llama|frozen=0.00480707,fseed=7,fmode=1|2026-08-12T13:19:17
+PRED|seed_r1000_struct|3.00|3.70|llama|frozen=0.000803873,fseed=7,fmode=1|2026-08-12T13:19:17
+RESULT|seed_r200|1337|6.80950|b1e31e7c99c0e3db455155f81021cee17eb1e6a89cefb836572a11efdb3ab272
 """

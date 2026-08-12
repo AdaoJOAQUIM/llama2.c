@@ -149,6 +149,33 @@ void params_invalidate_q(void);
 void opt_state_save(FILE *f,int step);
 int  opt_state_load(FILE *f);
 
+/* ---------------- frozen-mask / SEED format ----------------
+ * A checkpoint normally stores every weight.  The SEED format stores only
+ *   (a) the integer seed that generated the INITIAL weights, and
+ *   (b) the values of a fraction f of coordinates, chosen uniformly at random
+ *       from a stream derived from that same seed -- so the INDICES cost zero
+ *       bytes and need not be stored.
+ * Everything not in that subset must remain EXACTLY at its initial value for
+ * the reconstruction to be lossless, so the optimiser skips it entirely: no
+ * Adam update, no weight decay, and it is excluded from the gradient-norm used
+ * for clipping (otherwise the effective learning rate would shrink with f for
+ * a reason unrelated to freezing).
+ * frozen_build() must be called AFTER the architecture's build() and with the
+ * same seed, since the mask is defined over the flattened parameter layout. */
+/* fmode 0: coordinates chosen uniformly at random.
+   fmode 1: every coordinate of the SMALL tensors (the rmsnorm gains) is taken
+            first, then the remainder uniformly at random.  This is the
+            BitFit-shaped version of the same idea and is the strongest form of
+            the hypothesis; testing only the random mask would make the negative
+            result cheap.  Both are index-free: the mask is a function of the
+            recorded seed and the parameter layout alone. */
+void      frozen_build(float frac, uint32_t fseed, int fmode);
+long long frozen_trainable(void);   /* K */
+int       frozen_active(void);
+/* copy the K trainable values out of / into the live parameters, in mask order */
+void      frozen_gather(float *dst);
+void      frozen_apply(const float *src);
+
 /* ---------------- rng ---------------- */
 extern uint64_t g_rng;
 static inline uint32_t rnd_u32(void){ g_rng^=g_rng>>12; g_rng^=g_rng<<25; g_rng^=g_rng>>27; return (uint32_t)((g_rng*0x2545F4914F6CDD1DULL)>>32); }

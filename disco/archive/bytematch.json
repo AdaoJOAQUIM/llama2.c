@@ -1,0 +1,58 @@
+{
+ "988": {
+  "bpb": 3.4982771821694936,
+  "mix": "bigram",
+  "n_bigram": 118,
+  "n_trigram": 0,
+  "bytes_used": 986
+ },
+ "4952": {
+  "bpb": 2.676073422767382,
+  "mix": "trigram",
+  "n_bigram": 0,
+  "n_trigram": 887,
+  "bytes_used": 4949
+ },
+ "9904": {
+  "bpb": 2.5133822106328867,
+  "mix": "trigram",
+  "n_bigram": 0,
+  "n_trigram": 1878,
+  "bytes_used": 9904
+ },
+ "49520": {
+  "bpb": 2.489854135026079,
+  "mix": "trigram",
+  "n_bigram": 0,
+  "n_trigram": 9801,
+  "bytes_used": 49519
+ },
+ "99040": {
+  "bpb": 2.490456017632741,
+  "mix": "bi+tri",
+  "n_bigram": 1694,
+  "n_trigram": 11998,
+  "bytes_used": 67280
+ },
+ "247601": {
+  "bpb": 2.490456017632741,
+  "mix": "bi+tri",
+  "n_bigram": 1694,
+  "n_trigram": 11998,
+  "bytes_used": 67280
+ },
+ "495202": {
+  "bpb": 2.490456017632741,
+  "mix": "bi+tri",
+  "n_bigram": 1694,
+  "n_trigram": 11998,
+  "bytes_used": 67280
+ },
+ "990404": {
+  "bpb": 2.490456017632741,
+  "mix": "bi+tri",
+  "n_bigram": 1694,
+  "n_trigram": 11998,
+  "bytes_used": 67280
+ }
+}
