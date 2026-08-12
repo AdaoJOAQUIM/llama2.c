@@ -259,4 +259,6 @@ PRED|seed_r15_emb|1.95|2.80|llama|frozen=0.0664422,fseed=7,fmode=2|2026-08-12T13
 PRED|seed_r200_emb|2.50|3.40|llama|frozen=0.00480707,fseed=7,fmode=2|2026-08-12T13:31:45
 RESULT|seed_r100|2|6.27305|6e3282d956aeedbb1c2857130d6c938d7852f0ff7f3b65daf0859d22d0f2cdcd
 VERDICT|seed_r100|LOSS|-4.51745|mean 6.2867 vs baseline 1.7693, margin -4.5174, threshold 0.0318 (2sd); prediction [2.40,2.95] REFUTED
+RESULT|seed_r1000|1337|7.59016|8ebbd31f227bf1d034204b1ace88d151b9a5d094bfbde5c8468d13ecb318fb80
+VERDICT|seed_r1000|UNDERPOWERED|0.00000|1/2 seeds
 """
