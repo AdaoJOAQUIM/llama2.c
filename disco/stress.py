@@ -31,7 +31,13 @@ HDR = 192          # SeedHdr bytes; flips are confined to the payload
 
 
 def run(args, **kw):
-    return subprocess.run(args, cwd=HERE, capture_output=True, text=True, **kw)
+    # errors="replace" is required, not cosmetic: a heavily compressed model
+    # emits arbitrary bytes and `infer` echoes its sample to stderr, so the
+    # stream is not valid UTF-8 for exactly the artifacts under test. Strict
+    # decoding made the battery pass on the dense model and crash on every
+    # compressed one.
+    return subprocess.run(args, cwd=HERE, capture_output=True, text=True,
+                          errors="replace", **kw)
 
 
 def artifact_args(sd, ck, frac):

@@ -1,0 +1,81 @@
+{
+ "label": "dense",
+ "arch": "llama",
+ "frozen_frac": 1.0,
+ "ckpt": "/home/user/llama2.c/disco/runs/seed/dense_s1337.bin",
+ "lossless": {
+  "max_abs_diff": 0.0,
+  "dense_bytes": 990404,
+  "seed_bytes": 990404,
+  "ratio": 1.0,
+  "lossless": true
+ },
+ "runtime": {
+  "arch": "llama",
+  "params": 247552,
+  "stored_bytes": 990208,
+  "wbytes_per_tok": 990208,
+  "wtraffic_per_tok": 990464,
+  "working_set_16tok": 990208,
+  "sbytes_per_tok": 170880,
+  "macs_per_tok": 332288,
+  "tok_per_sec": 13093.97,
+  "peak_rss_kb": 5920,
+  "consistency": 0.0,
+  "gen": 256,
+  "kout": 1,
+  "frac_fast_decode": 0.0,
+  "load_sec": 0.0052,
+  "artifact_bytes": 990404
+ },
+ "ood": {
+  "ood_id": 1.75746,
+  "ood_rot13": 8.18008,
+  "ood_case": 13.30469,
+  "ood_shuf": 2.62521,
+  "ood_synth": 8.03682
+ },
+ "val_bpb": 1.76066,
+ "bypos": [
+  2.12972,
+  1.72316,
+  1.75092,
+  1.75686,
+  1.74136,
+  1.75826,
+  1.74752,
+  1.7284,
+  1.70762,
+  1.71746,
+  1.73738,
+  1.73882,
+  1.70287,
+  1.75432,
+  1.73955,
+  1.73641
+ ],
+ "horizon": {
+  "chars": 2048,
+  "distinct4": 0.7613691931540343,
+  "distinct_chars": 39,
+  "longest_period_repeat": 8
+ },
+ "faults": {
+  "payload_bits": 7923168,
+  "flip16": {
+   "n": 8,
+   "n_finite": 5,
+   "median": 1.75654,
+   "worst": 1.75682,
+   "best": 1.75641
+  },
+  "rate_1e4_bits": 792,
+  "rate1e4": {
+   "n": 8,
+   "n_finite": 0,
+   "median": null,
+   "worst": null,
+   "best": null
+  }
+ }
+}
