@@ -671,6 +671,25 @@ void frozen_build(float frac,uint32_t fseed,int fmode){
       for(int j=0;j<g_params[i]->n && need>0;j++){ g_mask[i][j]=1; need--; left--; }
     }
   }
+  /* fmode 2 spends the budget on the LARGEST tensors first.  For this
+     architecture the largest is the tied token embedding, which is also the
+     output projection -- so this is the test of whether the binding constraint
+     on compressibility is the readout rather than the trunk.  A readout left at
+     its random initialisation cannot separate 257 symbols however well the
+     trunk is trained, which would put a hard floor on the reachable ratio that
+     no allocation strategy can move. */
+  if(fmode==2){
+    for(int pass=0; pass<g_nparams && need>0; pass++){
+      int bi=-1; long long bn=-1;
+      for(int i=0;i<g_nparams;i++){
+        if(g_params[i]->ndim<2 || g_mask[i][0]) continue;
+        if(g_params[i]->n>bn){ bn=g_params[i]->n; bi=i; }
+      }
+      if(bi<0) break;
+      for(int j=0;j<g_params[bi]->n && need>0;j++){ g_mask[bi][j]=1; need--; left--; }
+      if(!g_mask[bi][0]) break;   /* budget ran out before this tensor started */
+    }
+  }
   /* uniform WITHOUT replacement over whatever is left: coordinate i is selected
      with probability (needed remaining)/(coordinates remaining).  Uses its OWN
      prng stream so the batch-order stream g_rng is untouched and a frozen run
